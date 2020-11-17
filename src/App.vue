@@ -4,14 +4,18 @@
       <div class="logo"></div>
       <v-spacer />
       {{ userEmail }}
-      <v-btn @click="signOut" v-if="loggedInStatus.loggedIn" text color="#086797"
+      <v-btn
+        @click="signOut"
+        v-if="loggedInStatus.loggedIn"
+        text
+        color="#086797"
         >Sign out</v-btn
       >
     </v-app-bar>
     <v-container>
       <v-row align="center">
-        <v-col
-          ><v-select
+        <v-col>
+          <v-select
             label="devices"
             v-if="devices.length > 1"
             :items="devices"
@@ -19,7 +23,8 @@
             @change="selectedDevicesChanged"
             filled
             light
-        /></v-col>
+          />
+        </v-col>
         <v-col>
           <v-select
             label="timespan"
@@ -28,8 +33,7 @@
             light
             v-model="selectedTimespan"
             @change="selectedTimespanChanged"
-          >
-          </v-select>
+          />
         </v-col>
       </v-row>
       <v-row v-if="isCustomTimespan" align="center">
@@ -101,6 +105,7 @@
             :items-per-page="eventItems.length"
             sort-by="time"
             sort-desc
+            :custom-sort="sortItems"
             hide-default-footer
             :no-data-text="'No events found for selected timespan'"
           >
@@ -121,7 +126,8 @@ import { Component, Vue } from "vue-property-decorator";
 import VueApexCharts from "vue-apexcharts";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
-import { timeAgo } from "@/time-ago";
+import { formatTime } from "@/utils";
+
 Vue.use(VueApexCharts);
 
 const hostName = `${window.location.protocol}//${window.location.host}`;
@@ -136,19 +142,56 @@ const auth = new CognitoAuth({
 const MIN_ERROR_THRESHOLD = 42.5;
 const API_BASE =
   "https://3pu8ojk2ej.execute-api.ap-southeast-2.amazonaws.com/default";
-
-// Add out API base url to all our Axios requests (this assumes that all axios requests are API calls, which may
-// not always be true)
 // If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
 // Set the auth token for axios to use when the component is created.
-let currentToken = "";
-const makeGetRequest = (url: string): Promise<Response> => {
-  return fetch(`${API_BASE}${url}`, {
-    method: "GET",
-    headers: {
-      Authorization: currentToken
-    }
-  });
+const makeGetRequest = async (url: string): Promise<Response> => {
+  // TODO(jon): We may need to refresh the token if the user has left the page open for a long time between requests?
+  const oldToken = auth.getCachedSession().getIdToken();
+  const { exp } = auth
+    .getCachedSession()
+    .getIdToken()
+    .decodePayload() as any;
+  const now = new Date().getTime() / 1000;
+  const hasExpired = now > exp;
+  console.log(now, exp, hasExpired);
+  if (hasExpired) {
+    console.log("Refreshing session");
+    return new Promise((resolve, reject) => {
+      auth.userhandler.onSuccess = async (session: CognitoAuthSession) => {
+        const { exp } = session.getIdToken().decodePayload() as any;
+        const now = new Date().getTime() / 1000;
+        const r = fetch(`${API_BASE}${url}`, {
+          method: "GET",
+          headers: {
+            Authorization: auth.getCachedSession().getIdToken().getJwtToken()
+          }
+        });
+        resolve(r);
+      };
+      //auth.getSession();
+      auth.onSuccessRefreshToken = (json: string) => {
+        const session = JSON.parse(json);
+        // Do something with this?
+      };
+      auth.refreshSession(
+        auth
+          .getCachedSession()
+          .getRefreshToken()
+          .getToken()
+      );
+    });
+  } else {
+    console.log("token expires in ", (exp - now) / 60);
+    return fetch(`${API_BASE}${url}`, {
+      method: "GET",
+      headers: {
+        Authorization: auth
+          .getCachedSession()
+          .getIdToken()
+          .getJwtToken()
+      }
+    });
+  }
   // TODO(jon): If we get a 401 response, log the user out.
 };
 
@@ -173,15 +216,8 @@ interface EventTableItem {
   threshold: number;
   result: "Fever" | "Normal" | "Error";
   timestamp: Date;
-  timeAgo: string;
-}
-
-interface EventTableItemRaw {
-  displayedTemperature: number;
-  threshold: number;
-  result: "Fever" | "Normal" | "Error";
-  timestamp: Date;
-  timeAgo: () => string;
+  time: string;
+  [key: string]: string | number | Date;
 }
 
 interface DBNumber {
@@ -192,10 +228,30 @@ interface DBString {
 }
 
 interface DynamoEventItem {
-  disp: DBNumber;
-  fth: DBNumber;
-  tsc: DBString;
+  disp: number;
+  fth: number;
+  tsc: string;
 }
+
+const unwrapDynamoQuery = (data) => {
+  for (const [key, val] of Object.entries(data)) {
+    const type = typeof val;
+    if (type === "object") {
+      if (Array.isArray(val)) {
+        for (let i = 0; i < val.length; i++) {
+          val[i] = unwrapDynamoQuery(val[i]);
+        }
+      } else {
+        if (val.hasOwnProperty("S")) {
+          data[key] = val.S.trim();
+        } else if (val.hasOwnProperty("N")) {
+          data[key] = Number(val.N);
+        }
+      }
+    }
+  }
+  return data;
+};
 
 @Component({
   components: { apexchart: VueApexCharts }
@@ -207,7 +263,7 @@ export default class App extends Vue {
   } = { loggedIn: false, currentUser: null };
   private devices: string[] = [];
   private selectedDevice = "";
-  private eventItems: EventTableItemRaw[] = [];
+  private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
   private showDateRangePicker = false;
   private timespans = [
@@ -228,7 +284,27 @@ export default class App extends Vue {
       value: ["2020-10-01", "2020-10-04"] // Concrete date ranges
     }
   ];
-  private selectedTimespan = this.timespans[0].value;
+  private selectedTimespan = this.timespans[1].value;
+
+  sortItems(
+    items: EventTableItem[],
+    index: (string | undefined)[],
+    isDesc: (boolean | undefined)[]
+  ) {
+    if (index[0] !== undefined && isDesc[0] !== undefined) {
+      const i = index[0] === "time" ? "timestamp" : index[0];
+      if (isDesc[0]) {
+        items.sort((a: EventTableItem, b: EventTableItem) =>
+          a[i] < b[i] ? 1 : -1
+        );
+      } else {
+        items.sort((a: EventTableItem, b: EventTableItem) =>
+          a[i] > b[i] ? 1 : -1
+        );
+      }
+    }
+    return items;
+  }
 
   get dateRangeForSelectedTimespan(): {
     startDate: string | null;
@@ -266,11 +342,7 @@ export default class App extends Vue {
   }
 
   get events(): EventTableItem[] {
-    return this.eventItems.map(item => ({
-      ...item,
-      timeAgo: item.timeAgo(),
-      time: item.timestamp.getTime()
-    }));
+    return this.eventItems;
   }
 
   get isCustomTimespan(): boolean {
@@ -307,11 +379,11 @@ export default class App extends Vue {
     },
     {
       text: "Time",
-      value: "timeAgo"
+      value: "time"
     }
   ];
 
-  getColorForItem(item: EventTableItemRaw): string {
+  getColorForItem(item: EventTableItem): string {
     if (item.displayedTemperature > MIN_ERROR_THRESHOLD) {
       return "#B8860B";
     }
@@ -401,8 +473,7 @@ export default class App extends Vue {
 
   created() {
     auth.userhandler = {
-      onSuccess: (session: CognitoAuthSession) => {
-        currentToken = session.getIdToken().getJwtToken();
+      onSuccess: (_session: CognitoAuthSession) => {
         this.loggedInStatus.currentUser = auth.getCurrentUser();
         this.loggedInStatus.loggedIn = true;
         if (window.location.href.includes("?code=")) {
@@ -452,47 +523,51 @@ export default class App extends Vue {
     }
     const response = await makeGetRequest(url);
     const events = await response.json();
-    this.eventItems = Object.freeze(
-      events.Items.map(
-        (item: DynamoEventItem): EventTableItemRaw => {
-          const displayedTemp = Number(item.disp.N);
-          const threshold = Number(item.fth.N);
-          const date = item.tsc.S.replace(/_/g, ":");
-          const lastHyphen = date.lastIndexOf(":");
-          const d = new Date(
-            Date.parse(
-              `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-            )
-          );
-          return {
-            //sampleRaw: Number(item.scrr.N),
-            //meta: JSON.parse(item.meta.S),
-            //softwareVersion: item.ver.S,
-            //thermalRefRaw: Number(item.refr.N),
-            timestamp: d,
-            displayedTemperature: Number(displayedTemp.toFixed(2)),
-            threshold: threshold,
-            result:
-              displayedTemp > MIN_ERROR_THRESHOLD
-                ? "Error"
-                : displayedTemp > threshold
-                ? "Fever"
-                : "Normal",
-            timeAgo: () => timeAgo(d)
-          };
-        }
-      )
-        .filter((item: EventTableItemRaw) => item.displayedTemperature > 0)
-        .sort(
-          (a: EventTableItemRaw, b: EventTableItemRaw) =>
-            a.timestamp < b.timestamp
+    console.log(events);
+    if (events.Items) {
+      this.eventItems = Object.freeze(
+        events.Items.map(
+          (item: DynamoEventItem): EventTableItem => {
+            const displayedTemp = item.disp;
+            const threshold = item.fth;
+            const date = item.tsc.replace(/_/g, ":");
+            const lastHyphen = date.lastIndexOf(":");
+            const d = new Date(
+              Date.parse(
+                `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
+              )
+            );
+            return {
+              //sampleRaw: Number(item.scrr.N),
+              //meta: JSON.parse(item.meta.S),
+              //softwareVersion: item.ver.S,
+              //thermalRefRaw: Number(item.refr.N),
+              timestamp: d,
+              displayedTemperature: Number(displayedTemp.toFixed(2)),
+              threshold: threshold,
+              result:
+                displayedTemp > MIN_ERROR_THRESHOLD
+                  ? "Error"
+                  : displayedTemp > threshold
+                  ? "Fever"
+                  : "Normal",
+              time: formatTime(d)
+            };
+          }
         )
-    );
+          .filter((item: EventTableItem) => item.displayedTemperature > 0)
+          .sort((a: EventTableItem, b: EventTableItem) =>
+            a.timestamp < b.timestamp ? 1 : -1
+          )
+      );
+    }
     this.dataIsLoading = false;
   }
 
   async fetchDevicesForUser() {
     const devices = await makeGetRequest("/devices");
+    //const d = await devices.json();
+    //this.devices = d.devices;
     this.devices = await devices.json();
     if (this.devices.length === 1) {
       this.selectedDevice = this.devices[0];
