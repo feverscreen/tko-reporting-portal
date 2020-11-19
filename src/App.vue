@@ -4,6 +4,14 @@
       <div class="logo"></div>
       <v-spacer />
       {{ userEmail }}
+      <span>&nbsp;</span>
+      <v-btn
+        @click="showConfigDialog = true"
+        v-if="loggedInStatus.loggedIn"
+        text
+        color="#086797"
+        >Config</v-btn
+      >
       <v-btn
         @click="signOut"
         v-if="loggedInStatus.loggedIn"
@@ -17,10 +25,13 @@
         <v-col>
           <v-select
             label="devices"
-            v-if="devices.length > 1"
-            :items="devices"
-            v-model="selectedDevice"
+            :items="deviceIds"
+            v-model="selectedDevices"
+            item-text="name"
+            item-value="id"
             @change="selectedDevicesChanged"
+            multiple
+            chips
             filled
             light
           />
@@ -36,6 +47,32 @@
           />
         </v-col>
       </v-row>
+      <v-dialog
+        ref="dialog"
+        v-model="showConfigDialog"
+        persistent
+        width="290px"
+      >
+        <v-card>
+          <v-card-title>Name devices</v-card-title>
+          <v-container>
+            <v-text-field
+              :key="device.id"
+              :label="device.id"
+              v-for="device in devices"
+              v-model="device.name"
+            />
+          </v-container>
+          <v-card-actions>
+            <v-btn text color="primary" @click="showConfigDialog = false">
+              Cancel
+            </v-btn>
+            <v-btn text color="primary" @click="updateDeviceNames">
+              Save
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
       <v-row v-if="isCustomTimespan" align="center">
         <v-dialog
           ref="dialog"
@@ -70,7 +107,7 @@
           </v-date-picker>
         </v-dialog>
       </v-row>
-      <v-row v-if="selectedTimespan && selectedDevice">
+      <v-row v-if="selectedTimespan && selectedDevices.length">
         <div v-if="dataIsLoading" class="summary-bubbles">Loading...</div>
         <div v-else-if="eventItems.length !== 0" class="summary-bubbles">
           <h4>{{ eventItems.length }} screenings</h4>
@@ -89,7 +126,7 @@
           </div>
         </div>
       </v-row>
-      <v-row align="center" v-if="selectedTimespan && selectedDevice">
+      <v-row align="center" v-if="selectedTimespan && selectedDevices.length">
         <v-col>
           <apexchart
             height="100"
@@ -144,7 +181,12 @@ const API_BASE =
   "https://3pu8ojk2ej.execute-api.ap-southeast-2.amazonaws.com/default";
 // If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
 // Set the auth token for axios to use when the component is created.
-const makeGetRequest = async (url: string): Promise<Response> => {
+
+const makeRequest = async (
+  url: string,
+  method: string,
+  payload: any = undefined
+): Promise<Response> => {
   // TODO(jon): We may need to refresh the token if the user has left the page open for a long time between requests?
   const oldToken = auth.getCachedSession().getIdToken();
   const { exp } = auth
@@ -160,12 +202,19 @@ const makeGetRequest = async (url: string): Promise<Response> => {
       auth.userhandler.onSuccess = async (session: CognitoAuthSession) => {
         const { exp } = session.getIdToken().decodePayload() as any;
         const now = new Date().getTime() / 1000;
-        const r = fetch(`${API_BASE}${url}`, {
-          method: "GET",
+        const options: any = {
+          method,
           headers: {
-            Authorization: auth.getCachedSession().getIdToken().getJwtToken()
+            Authorization: auth
+              .getCachedSession()
+              .getIdToken()
+              .getJwtToken()
           }
-        });
+        };
+        if (method === "POST" && payload !== undefined) {
+          options.body = JSON.stringify(payload);
+        }
+        const r = fetch(`${API_BASE}${url}`, options);
         resolve(r);
       };
       //auth.getSession();
@@ -182,17 +231,32 @@ const makeGetRequest = async (url: string): Promise<Response> => {
     });
   } else {
     console.log("token expires in ", (exp - now) / 60);
-    return fetch(`${API_BASE}${url}`, {
-      method: "GET",
+    const options: any = {
+      method,
       headers: {
         Authorization: auth
           .getCachedSession()
           .getIdToken()
           .getJwtToken()
       }
-    });
+    };
+    if (method === "POST" && payload !== undefined) {
+      options.body = JSON.stringify(payload);
+    }
+    return fetch(`${API_BASE}${url}`, options);
   }
   // TODO(jon): If we get a 401 response, log the user out.
+};
+
+const makeGetRequest = async (url: string): Promise<Response> => {
+  return makeRequest(url, "GET");
+};
+
+const makePostRequest = async (
+  url: string,
+  payload: any
+): Promise<Response> => {
+  return makeRequest(url, "POST", payload);
 };
 
 const formatDate = (date: Date): string =>
@@ -200,6 +264,11 @@ const formatDate = (date: Date): string =>
     .toISOString()
     .replace(/:/g, "_")
     .replace(/\./g, "_");
+
+interface Device {
+  name: string;
+  id: string;
+}
 
 interface EventItem {
   meta: string;
@@ -216,24 +285,25 @@ interface EventTableItem {
   threshold: number;
   result: "Fever" | "Normal" | "Error";
   timestamp: Date;
+  device: string;
   time: string;
   [key: string]: string | number | Date;
-}
-
-interface DBNumber {
-  N: string;
-}
-interface DBString {
-  S: string;
 }
 
 interface DynamoEventItem {
   disp: number;
   fth: number;
   tsc: string;
+  uid: string;
 }
 
-const unwrapDynamoQuery = (data) => {
+interface SavedSettings {
+  devices: string[];
+  timespan: { start: number } | [string, string];
+}
+
+/*
+const unwrapDynamoQuery = data => {
   for (const [key, val] of Object.entries(data)) {
     const type = typeof val;
     if (type === "object") {
@@ -252,6 +322,7 @@ const unwrapDynamoQuery = (data) => {
   }
   return data;
 };
+ */
 
 @Component({
   components: { apexchart: VueApexCharts }
@@ -261,11 +332,12 @@ export default class App extends Vue {
     loggedIn: boolean;
     currentUser: string | null;
   } = { loggedIn: false, currentUser: null };
-  private devices: string[] = [];
-  private selectedDevice = "";
+  private devices: Record<string, Device> = {};
+  private selectedDevices: string[] = [];
   private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
   private showDateRangePicker = false;
+  private showConfigDialog = false;
   private timespans = [
     {
       text: "Last hour",
@@ -284,7 +356,8 @@ export default class App extends Vue {
       value: ["2020-10-01", "2020-10-04"] // Concrete date ranges
     }
   ];
-  private selectedTimespan = this.timespans[1].value;
+  private selectedTimespan: { start: number } | string[] = this.timespans[1]
+    .value;
 
   sortItems(
     items: EventTableItem[],
@@ -304,6 +377,28 @@ export default class App extends Vue {
       }
     }
     return items;
+  }
+
+  async updateDeviceNames() {
+
+    this.devices = Object.values(this.devices)
+      .map(item => ({
+        name: item.name === "" ? item.id : item.name,
+        id: item.id
+      }))
+      .reduce((acc: Record<string, Device>, item: Device) => {
+        acc[item.id] = item;
+        return acc;
+      }, {} as Record<string, Device>);
+    console.log(this.devices);
+    const response = await makePostRequest("/devices/update", this.devices);
+    const result = await response.json();
+    console.log("Got response", result);
+    this.showConfigDialog = false;
+  }
+
+  get deviceIds(): { name: string; id: string }[] {
+    return Object.values(this.devices);
   }
 
   get dateRangeForSelectedTimespan(): {
@@ -342,7 +437,10 @@ export default class App extends Vue {
   }
 
   get events(): EventTableItem[] {
-    return this.eventItems;
+    return this.eventItems.map((eventItem: EventTableItem) => ({
+      ...eventItem,
+      device: this.devices[eventItem.device].name
+    }));
   }
 
   get isCustomTimespan(): boolean {
@@ -369,6 +467,10 @@ export default class App extends Vue {
 
   // noinspection JSMismatchedCollectionQueryUpdate
   private headers: DataTableHeader[] = [
+    {
+      text: "Device",
+      value: "device"
+    },
     {
       text: "Screened Temp C",
       value: "displayedTemperature"
@@ -506,80 +608,135 @@ export default class App extends Vue {
     // Should be signed in already:
     this.loggedInStatus.currentUser = auth.getCurrentUser();
     this.loggedInStatus.loggedIn = true;
-    await this.fetchDevicesForUser();
+
+    // Load config from localStorage:
+    const configRaw = window.localStorage.getItem("config");
+    if (configRaw !== null) {
+      try {
+        const config = JSON.parse(configRaw) as SavedSettings;
+        this.selectedDevices = config.devices;
+        if (Array.isArray(config.timespan)) {
+          // Custom timespan:
+          this.timespans[this.timespans.length - 1].value = config.timespan;
+          this.selectedTimespan = this.timespans[
+            this.timespans.length - 1
+          ].value;
+        } else {
+          const timespan = this.timespans.find(
+            timespan =>
+              !Array.isArray(timespan.value) &&
+              (timespan as { text: string; value: { start: number } }).value
+                .start === (config.timespan as { start: number }).start
+          );
+          if (timespan) {
+            this.selectedTimespan = timespan.value;
+          }
+        }
+      } catch (e) {
+        // Do nothing
+      }
+      await this.fetchDevicesForUser();
+      this.selectedDevices = this.selectedDevices.filter(device =>
+        Object.keys(this.devices).includes(device)
+      );
+      if (this.selectedDevices.length) {
+        await this.fetchEventsForDevices(
+          this.selectedDevices,
+          this.dateRangeForSelectedTimespan
+        );
+      }
+    } else {
+      await this.fetchDevicesForUser();
+    }
   }
 
-  async fetchEventsForDevice(
-    device: string,
+  async fetchEventsForDevices(
+    devices: string[],
     range: { startDate: string | null; endDate: string | null }
   ) {
+    const allEvents: Promise<DynamoEventItem[]>[] = [];
     this.dataIsLoading = true;
-    let url = `/events?deviceId=${device}&type=Screen`;
-    if (range.startDate) {
-      url += `&startDate=${range.startDate}`;
-    }
-    if (range.endDate) {
-      url += `&endDate=${range.endDate}`;
-    }
-    const response = await makeGetRequest(url);
-    const events = await response.json();
-    console.log(events);
-    if (events.Items) {
-      this.eventItems = Object.freeze(
-        events.Items.map(
-          (item: DynamoEventItem): EventTableItem => {
-            const displayedTemp = item.disp;
-            const threshold = item.fth;
-            const date = item.tsc.replace(/_/g, ":");
-            const lastHyphen = date.lastIndexOf(":");
-            const d = new Date(
-              Date.parse(
-                `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-              )
-            );
-            return {
-              //sampleRaw: Number(item.scrr.N),
-              //meta: JSON.parse(item.meta.S),
-              //softwareVersion: item.ver.S,
-              //thermalRefRaw: Number(item.refr.N),
-              timestamp: d,
-              displayedTemperature: Number(displayedTemp.toFixed(2)),
-              threshold: threshold,
-              result:
-                displayedTemp > MIN_ERROR_THRESHOLD
-                  ? "Error"
-                  : displayedTemp > threshold
-                  ? "Fever"
-                  : "Normal",
-              time: formatTime(d)
-            };
+    for (const device of devices) {
+      allEvents.push(
+        new Promise((resolve, reject) => {
+          let url = `/events?deviceId=${device}&type=Screen`;
+          if (range.startDate) {
+            url += `&startDate=${range.startDate}`;
           }
-        )
-          .filter((item: EventTableItem) => item.displayedTemperature > 0)
-          .sort((a: EventTableItem, b: EventTableItem) =>
-            a.timestamp < b.timestamp ? 1 : -1
-          )
+          if (range.endDate) {
+            url += `&endDate=${range.endDate}`;
+          }
+          makeGetRequest(url).then(response => {
+            response.json().then(result => resolve(result.Items));
+          });
+        })
       );
     }
+    const allEventData = await Promise.all(allEvents);
+    const mappedEventData = [];
+    for (const deviceEvents of allEventData) {
+      if (deviceEvents.length !== 0) {
+        mappedEventData.push(
+          ...deviceEvents.map(
+            (item: DynamoEventItem): EventTableItem => {
+              const displayedTemp = item.disp;
+              const threshold = item.fth;
+              const date = item.tsc.replace(/_/g, ":");
+              const lastHyphen = date.lastIndexOf(":");
+              const d = new Date(
+                Date.parse(
+                  `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
+                )
+              );
+              return Object.freeze({
+                device: item.uid,
+                timestamp: d,
+                displayedTemperature: Number(displayedTemp.toFixed(2)),
+                threshold: threshold,
+                result:
+                  displayedTemp > MIN_ERROR_THRESHOLD
+                    ? "Error"
+                    : displayedTemp > threshold
+                    ? "Fever"
+                    : "Normal",
+                time: formatTime(d)
+              });
+            }
+          )
+        );
+      }
+    }
+
+    this.eventItems = mappedEventData
+      .filter((item: EventTableItem) => item.displayedTemperature > 0)
+      .sort((a: EventTableItem, b: EventTableItem) =>
+        a.timestamp < b.timestamp ? 1 : -1
+      );
+
     this.dataIsLoading = false;
   }
 
   async fetchDevicesForUser() {
     const devices = await makeGetRequest("/devices");
-    //const d = await devices.json();
-    //this.devices = d.devices;
     this.devices = await devices.json();
-    if (this.devices.length === 1) {
-      this.selectedDevice = this.devices[0];
-      await this.fetchEventsForDevice(
-        this.selectedDevice,
+    if (Object.values(this.devices).length === 1) {
+      this.selectedDevices = [Object.keys(this.devices)[0]];
+      await this.fetchEventsForDevices(
+        this.selectedDevices,
         this.dateRangeForSelectedTimespan
       );
     }
   }
 
-  selectedDevicesChanged(deviceId: string) {
-    this.fetchEventsForDevice(deviceId, this.dateRangeForSelectedTimespan);
+  selectedDevicesChanged(deviceIds: string[]) {
+    window.localStorage.setItem(
+      "config",
+      JSON.stringify({
+        devices: deviceIds,
+        timespan: this.selectedTimespan
+      })
+    );
+    this.fetchEventsForDevices(deviceIds, this.dateRangeForSelectedTimespan);
   }
 
   selectedTimespanChanged(
@@ -590,12 +747,22 @@ export default class App extends Vue {
         }
       | string[]
   ) {
+    window.localStorage.setItem(
+      "config",
+      JSON.stringify({
+        devices: this.selectedDevices,
+        timespan: this.isCustomTimespan
+          ? this.timespans[this.timespans.length - 1].value
+          : timespan
+      })
+    );
+
     if (Array.isArray(timespan) && !this.showDateRangePicker) {
       this.showDateRangePicker = true;
-    } else if (this.selectedDevice) {
+    } else if (this.selectedDevices.length) {
       // Fetch events again with new timespan
-      this.fetchEventsForDevice(
-        this.selectedDevice,
+      this.fetchEventsForDevices(
+        this.selectedDevices,
         this.dateRangeForSelectedTimespan
       );
     }
