@@ -1,3 +1,3 @@
 export const formatTime = (d: Date): string => {
-    return `${d.toLocaleTimeString()}, ${d.toDateString()}`;
+    return `${d.toLocaleTimeString()} - ${d.toDateString()}`;
 }

@@ -6,13 +6,6 @@
       {{ userEmail }}
       <span>&nbsp;</span>
       <v-btn
-        @click="showConfigDialog = true"
-        v-if="loggedInStatus.loggedIn"
-        text
-        color="#086797"
-        >Config</v-btn
-      >
-      <v-btn
         @click="signOut"
         v-if="loggedInStatus.loggedIn"
         text
@@ -22,8 +15,21 @@
     </v-app-bar>
     <v-container>
       <v-row align="center">
+        <v-toolbar flat>
+          <v-spacer />
+          <v-btn text @click="showAlertsDialog = true">
+            Device alerts
+          </v-btn>
+          <v-btn text @click="showDeviceNamesDialog = true">
+            Device names
+          </v-btn>
+          <v-btn @click="exportCsv" text>Export CSV</v-btn>
+        </v-toolbar>
+      </v-row>
+      <v-row align="center">
         <v-col>
           <v-select
+            height="70"
             label="devices"
             :items="deviceIds"
             v-model="selectedDevices"
@@ -38,6 +44,7 @@
         </v-col>
         <v-col>
           <v-select
+            height="70"
             label="timespan"
             :items="timespans"
             filled
@@ -47,27 +54,62 @@
           />
         </v-col>
       </v-row>
+
       <v-dialog
         ref="dialog"
-        v-model="showConfigDialog"
+        v-model="showDeviceNamesDialog"
         persistent
-        width="290px"
+        max-width="500"
       >
-        <v-card>
-          <v-card-title>Name devices</v-card-title>
-          <v-container>
+        <v-card :loading="updatingDeviceNames">
+          <v-card-title>Device naming</v-card-title>
+          <v-card-subtitle align="left"
+            >Give your screening devices friendly names i.e "Staff Kitchen",
+            "Reception".</v-card-subtitle
+          >
+          <v-card-text>
             <v-text-field
+              v-for="device in devices"
               :key="device.id"
               :label="device.id"
-              v-for="device in devices"
               v-model="device.name"
             />
-          </v-container>
+          </v-card-text>
           <v-card-actions>
-            <v-btn text color="primary" @click="showConfigDialog = false">
+            <v-spacer />
+            <v-btn text color="primary" @click="showDeviceNamesDialog = false">
               Cancel
             </v-btn>
             <v-btn text color="primary" @click="updateDeviceNames">
+              Save
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+      <v-dialog
+        ref="dialog"
+        v-model="showAlertsDialog"
+        persistent
+        max-width="320"
+      >
+        <v-card :loading="updatingAlertSettings">
+          <v-card-title>Device alerts</v-card-title>
+          <v-card-subtitle align="left"
+            >Enable email alerts per device.</v-card-subtitle
+          >
+          <v-card-text>
+            <v-row v-for="device in devices" :key="device.id">
+              <v-col>
+                <v-switch :label="`${device.name}`" v-model="device.alerts" />
+              </v-col>
+            </v-row>
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn text color="primary" @click="showAlertsDialog = false">
+              Cancel
+            </v-btn>
+            <v-btn text color="primary" @click="updateAlertSettings">
               Save
             </v-btn>
           </v-card-actions>
@@ -164,6 +206,7 @@ import VueApexCharts from "vue-apexcharts";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
 import { formatTime } from "@/utils";
+import downloadCsv from "download-csv";
 
 Vue.use(VueApexCharts);
 
@@ -265,9 +308,18 @@ const formatDate = (date: Date): string =>
     .replace(/:/g, "_")
     .replace(/\./g, "_");
 
+const parseDate = (date: string): Date => {
+  const d = date.replace(/_/g, ":");
+  const lastHyphen = d.lastIndexOf(":");
+  return new Date(
+    Date.parse(`${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`)
+  );
+};
+
 interface Device {
   name: string;
   id: string;
+  alerts: boolean;
 }
 
 interface EventItem {
@@ -337,7 +389,10 @@ export default class App extends Vue {
   private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
   private showDateRangePicker = false;
-  private showConfigDialog = false;
+  private showDeviceNamesDialog = false;
+  private updatingDeviceNames = false;
+  private showAlertsDialog = false;
+  private updatingAlertSettings = false;
   private timespans = [
     {
       text: "Last hour",
@@ -379,22 +434,63 @@ export default class App extends Vue {
     return items;
   }
 
-  async updateDeviceNames() {
+  exportCsv() {
+    let start = this.dateRangeForSelectedTimespan.startDate;
+    start = start?.substr(0, start?.lastIndexOf("_"));
+    let end =
+      this.dateRangeForSelectedTimespan.endDate || formatDate(new Date());
+    end = end.substr(0, end.lastIndexOf("_"));
+    const range = `${start} - ${end}`.replace(/T/g, " ").replace(/_/g, "-");
+    downloadCsv(
+      this.events,
+      {
+        device: "Device",
+        timestamp: "Date/Time",
+        displayedTemperature: "Screened Temp C",
+        threshold: "Fever Threshold C",
+        time: "Time",
+        result: "Screening Result"
+      },
+      `${this.selectedDevices
+        .map(device => this.devices[device].name.replace(/,/g, ""))
+        .join("|")} -- ${range}.csv`
+    );
+  }
 
+  async updateDeviceNames() {
+    this.updatingDeviceNames = true;
     this.devices = Object.values(this.devices)
       .map(item => ({
-        name: item.name === "" ? item.id : item.name,
-        id: item.id
+        ...item,
+        name: item.name === "" ? item.id : item.name
       }))
       .reduce((acc: Record<string, Device>, item: Device) => {
         acc[item.id] = item;
         return acc;
       }, {} as Record<string, Device>);
-    console.log(this.devices);
     const response = await makePostRequest("/devices/update", this.devices);
     const result = await response.json();
     console.log("Got response", result);
-    this.showConfigDialog = false;
+    this.updatingDeviceNames = false;
+    this.showDeviceNamesDialog = false;
+  }
+
+  async updateAlertSettings() {
+    this.updatingAlertSettings = true;
+    this.devices = Object.values(this.devices)
+      .map(item => ({
+        ...item,
+        name: item.name === "" ? item.id : item.name
+      }))
+      .reduce((acc: Record<string, Device>, item: Device) => {
+        acc[item.id] = item;
+        return acc;
+      }, {} as Record<string, Device>);
+    const response = await makePostRequest("/devices/update", this.devices);
+    const result = await response.json();
+    console.log("Got response", result);
+    this.updatingAlertSettings = false;
+    this.showAlertsDialog = false;
   }
 
   get deviceIds(): { name: string; id: string }[] {
