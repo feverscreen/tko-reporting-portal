@@ -435,8 +435,8 @@ export default class App extends Vue {
   }
 
   exportCsv() {
-    let start = this.dateRangeForSelectedTimespan.startDate;
-    start = start?.substr(0, start?.lastIndexOf("_"));
+    let start = this.dateRangeForSelectedTimespan.startDate as string;
+    start = start.substr(0, start.lastIndexOf("_"));
     let end =
       this.dateRangeForSelectedTimespan.endDate || formatDate(new Date());
     end = end.substr(0, end.lastIndexOf("_"));
