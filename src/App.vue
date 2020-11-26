@@ -417,8 +417,7 @@ export default class App extends Vue {
         acc[item.id] = item;
         return acc;
       }, {} as Record<string, Device>);
-    const response = await makePostRequest("/devices/update", this.devices);
-    const result = await response.json();
+    await makePostRequest("/devices/update", this.devices);
     this.updatingDeviceNames = false;
     this.showDeviceNamesDialog = false;
   }
@@ -434,8 +433,7 @@ export default class App extends Vue {
         acc[item.id] = item;
         return acc;
       }, {} as Record<string, Device>);
-    const response = await makePostRequest("/devices/update", this.devices);
-    const result = await response.json();
+    await makePostRequest("/devices/update", this.devices);
     this.updatingAlertSettings = false;
     this.showAlertsDialog = false;
   }
