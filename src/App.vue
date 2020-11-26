@@ -150,7 +150,9 @@
         </v-dialog>
       </v-row>
       <v-row v-if="selectedTimespan && selectedDevices.length">
-        <div v-if="dataIsLoading" class="summary-bubbles">Loading...</div>
+        <div v-if="dataIsLoading && !eventItems.length" class="summary-bubbles">
+          Loading...
+        </div>
         <div v-else-if="eventItems.length !== 0" class="summary-bubbles">
           <h4>{{ eventItems.length }} screenings</h4>
           <div class="event-summary normal" v-if="numNormalEvents !== 0">
@@ -225,55 +227,24 @@ const API_BASE =
 // If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
 // Set the auth token for axios to use when the component is created.
 
+let lastApiRequestTime = 0;
+
 const makeRequest = async (
   url: string,
   method: string,
   payload: any = undefined
 ): Promise<Response> => {
-  // TODO(jon): We may need to refresh the token if the user has left the page open for a long time between requests?
-  const oldToken = auth.getCachedSession().getIdToken();
   const { exp } = auth
     .getCachedSession()
     .getIdToken()
     .decodePayload() as any;
   const now = new Date().getTime() / 1000;
   const hasExpired = now > exp;
-  console.log(now, exp, hasExpired);
   if (hasExpired) {
-    console.log("Refreshing session");
-    return new Promise((resolve, reject) => {
-      auth.userhandler.onSuccess = async (session: CognitoAuthSession) => {
-        const { exp } = session.getIdToken().decodePayload() as any;
-        const now = new Date().getTime() / 1000;
-        const options: any = {
-          method,
-          headers: {
-            Authorization: auth
-              .getCachedSession()
-              .getIdToken()
-              .getJwtToken()
-          }
-        };
-        if (method === "POST" && payload !== undefined) {
-          options.body = JSON.stringify(payload);
-        }
-        const r = fetch(`${API_BASE}${url}`, options);
-        resolve(r);
-      };
-      //auth.getSession();
-      auth.onSuccessRefreshToken = (json: string) => {
-        const session = JSON.parse(json);
-        // Do something with this?
-      };
-      auth.refreshSession(
-        auth
-          .getCachedSession()
-          .getRefreshToken()
-          .getToken()
-      );
-    });
+    window.location.reload();
+    // Should never happen.
+    return fetch(`${API_BASE}${url}`);
   } else {
-    console.log("token expires in ", (exp - now) / 60);
     const options: any = {
       method,
       headers: {
@@ -286,9 +257,9 @@ const makeRequest = async (
     if (method === "POST" && payload !== undefined) {
       options.body = JSON.stringify(payload);
     }
+    lastApiRequestTime = new Date().getTime();
     return fetch(`${API_BASE}${url}`, options);
   }
-  // TODO(jon): If we get a 401 response, log the user out.
 };
 
 const makeGetRequest = async (url: string): Promise<Response> => {
@@ -312,7 +283,7 @@ const parseDate = (date: string): Date => {
   const d = date.replace(/_/g, ":");
   const lastHyphen = d.lastIndexOf(":");
   return new Date(
-    Date.parse(`${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`)
+    Date.parse(`${d.substr(0, lastHyphen)}.${d.substr(lastHyphen + 1)}`)
   );
 };
 
@@ -353,28 +324,6 @@ interface SavedSettings {
   devices: string[];
   timespan: { start: number } | [string, string];
 }
-
-/*
-const unwrapDynamoQuery = data => {
-  for (const [key, val] of Object.entries(data)) {
-    const type = typeof val;
-    if (type === "object") {
-      if (Array.isArray(val)) {
-        for (let i = 0; i < val.length; i++) {
-          val[i] = unwrapDynamoQuery(val[i]);
-        }
-      } else {
-        if (val.hasOwnProperty("S")) {
-          data[key] = val.S.trim();
-        } else if (val.hasOwnProperty("N")) {
-          data[key] = Number(val.N);
-        }
-      }
-    }
-  }
-  return data;
-};
- */
 
 @Component({
   components: { apexchart: VueApexCharts }
@@ -470,7 +419,6 @@ export default class App extends Vue {
       }, {} as Record<string, Device>);
     const response = await makePostRequest("/devices/update", this.devices);
     const result = await response.json();
-    console.log("Got response", result);
     this.updatingDeviceNames = false;
     this.showDeviceNamesDialog = false;
   }
@@ -488,7 +436,6 @@ export default class App extends Vue {
       }, {} as Record<string, Device>);
     const response = await makePostRequest("/devices/update", this.devices);
     const result = await response.json();
-    console.log("Got response", result);
     this.updatingAlertSettings = false;
     this.showAlertsDialog = false;
   }
@@ -744,6 +691,21 @@ export default class App extends Vue {
     } else {
       await this.fetchDevicesForUser();
     }
+
+    // Periodically refresh.
+    setInterval(async () => {
+      const now = new Date().getTime();
+      if (now - lastApiRequestTime > 1000 * 50) {
+        if (this.selectedDevices.length) {
+          await this.fetchEventsForDevices(
+            this.selectedDevices,
+            this.dateRangeForSelectedTimespan
+          );
+        } else {
+          await this.fetchDevicesForUser();
+        }
+      }
+    }, 1000 * 60);
   }
 
   async fetchEventsForDevices(
