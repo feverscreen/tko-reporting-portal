@@ -7,7 +7,6 @@
       <span>&nbsp;</span>
       <v-btn
         @click="signOut"
-        v-if="loggedInStatus.loggedIn"
         text
         color="#086797"
         >Sign out</v-btn
@@ -279,28 +278,10 @@ const formatDate = (date: Date): string =>
     .replace(/:/g, "_")
     .replace(/\./g, "_");
 
-const parseDate = (date: string): Date => {
-  const d = date.replace(/_/g, ":");
-  const lastHyphen = d.lastIndexOf(":");
-  return new Date(
-    Date.parse(`${d.substr(0, lastHyphen)}.${d.substr(lastHyphen + 1)}`)
-  );
-};
-
 interface Device {
   name: string;
   id: string;
   alerts: boolean;
-}
-
-interface EventItem {
-  meta: string;
-  thermalRefRaw: number;
-  sampleRaw: number;
-  timestamp: Date;
-  softwareVersion: string;
-  threshold: number;
-  displayedTemperature: number;
 }
 
 interface EventTableItem {
@@ -596,10 +577,6 @@ export default class App extends Vue {
     return [
       {
         name: "temperatures",
-        // data: this.eventItems.map(({ displayedTemperature, timestamp }) => [
-        //   timestamp.getTime(),
-        //   displayedTemperature
-        // ])
         data: this.eventItems.map(
           ({ displayedTemperature }) => displayedTemperature
         )
