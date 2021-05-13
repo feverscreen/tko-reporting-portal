@@ -5,20 +5,13 @@
       <v-spacer />
       {{ userEmail }}
       <span>&nbsp;</span>
-      <v-btn
-        @click="signOut"
-        text
-        color="#086797"
-        >Sign out</v-btn
-      >
+      <v-btn @click="signOut" text color="#086797">Sign out</v-btn>
     </v-app-bar>
     <v-container>
       <v-row align="center">
         <v-toolbar flat>
           <v-spacer />
-          <v-btn text @click="showAlertsDialog = true">
-            Device alerts
-          </v-btn>
+          <v-btn text @click="showAlertsDialog = true"> Device alerts </v-btn>
           <v-btn text @click="showDeviceNamesDialog = true">
             Device names
           </v-btn>
@@ -28,7 +21,7 @@
       <v-row align="center">
         <v-col>
           <v-select
-            height="70"
+            class="selectors"
             label="devices"
             :items="deviceIds"
             v-model="selectedDevices"
@@ -39,11 +32,27 @@
             chips
             filled
             light
-          />
+          >
+            <template v-slot:prepend-item>
+              <v-list-item ripple @click="selectAllDevices">
+                <v-list-item-action>
+                  <v-icon
+                    :color="selectedDevices.length > 0 ? 'indigo darken-4' : ''"
+                  >
+                    {{ icon }}
+                  </v-icon>
+                </v-list-item-action>
+                <v-list-item-content>
+                  <v-list-item-title> Select All </v-list-item-title>
+                </v-list-item-content>
+              </v-list-item>
+              <v-divider class="mt-2"></v-divider>
+            </template>
+          </v-select>
         </v-col>
         <v-col>
           <v-select
-            height="70"
+            height="68"
             label="timespan"
             :items="timespans"
             filled
@@ -172,11 +181,9 @@
       <v-row align="center" v-if="selectedTimespan && selectedDevices.length">
         <v-col>
           <apexchart
-            height="100"
-            type="bar"
-            :options="chartOptions"
-            :series="temperatures"
-          ></apexchart>
+            :temperatures="temperatures"
+            :getColorForItem="getColorForItem"
+          />
           <v-data-table
             fixed-header
             :loading="dataIsLoading"
@@ -189,7 +196,7 @@
             hide-default-footer
             :no-data-text="'No events found for selected timespan'"
           >
-            <template v-slot:item.displayedTemperature="{ item }">
+            <template v-slot:[`item.displayedTemperature`]="{ item }">
               <v-chip :color="getColorForItem(item)" dark>
                 {{ item.displayedTemperature }}
               </v-chip>
@@ -204,6 +211,7 @@
 <script lang="ts">
 import { Component, Vue } from "vue-property-decorator";
 import VueApexCharts from "vue-apexcharts";
+import ScreeningChart from "@/components/ScreeningChart.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
 import { formatTime } from "@/utils";
@@ -217,7 +225,7 @@ const auth = new CognitoAuth({
   AppWebDomain: "tekahuora.auth.ap-southeast-2.amazoncognito.com",
   TokenScopesArray: ["email", "openid", "aws.cognito.signin.user.admin"],
   RedirectUriSignIn: hostName,
-  RedirectUriSignOut: hostName
+  RedirectUriSignOut: hostName,
 });
 
 const MIN_ERROR_THRESHOLD = 42.5;
@@ -233,10 +241,7 @@ const makeRequest = async (
   method: string,
   payload: any = undefined
 ): Promise<Response> => {
-  const { exp } = auth
-    .getCachedSession()
-    .getIdToken()
-    .decodePayload() as any;
+  const { exp } = auth.getCachedSession().getIdToken().decodePayload() as any;
   const now = new Date().getTime() / 1000;
   const hasExpired = now > exp;
   if (hasExpired) {
@@ -247,11 +252,8 @@ const makeRequest = async (
     const options: any = {
       method,
       headers: {
-        Authorization: auth
-          .getCachedSession()
-          .getIdToken()
-          .getJwtToken()
-      }
+        Authorization: auth.getCachedSession().getIdToken().getJwtToken(),
+      },
     };
     if (method === "POST" && payload !== undefined) {
       options.body = JSON.stringify(payload);
@@ -273,10 +275,7 @@ const makePostRequest = async (
 };
 
 const formatDate = (date: Date): string =>
-  date
-    .toISOString()
-    .replace(/:/g, "_")
-    .replace(/\./g, "_");
+  date.toISOString().replace(/:/g, "_").replace(/\./g, "_");
 
 interface Device {
   name: string;
@@ -307,7 +306,7 @@ interface SavedSettings {
 }
 
 @Component({
-  components: { apexchart: VueApexCharts }
+  components: { apexchart: ScreeningChart },
 })
 export default class App extends Vue {
   private loggedInStatus: {
@@ -326,20 +325,20 @@ export default class App extends Vue {
   private timespans = [
     {
       text: "Last hour",
-      value: { start: -1 } // Relative hours to now.
+      value: { start: -1 }, // Relative hours to now.
     },
     {
       text: "Last 24 hours",
-      value: { start: -24 }
+      value: { start: -24 },
     },
     {
       text: "Last week",
-      value: { start: -(24 * 7) }
+      value: { start: -(24 * 7) },
     },
     {
       text: "Custom",
-      value: ["2020-10-01", "2020-10-04"] // Concrete date ranges
-    }
+      value: ["2020-10-01", "2020-10-04"], // Concrete date ranges
+    },
   ];
   private selectedTimespan: { start: number } | string[] = this.timespans[1]
     .value;
@@ -379,10 +378,10 @@ export default class App extends Vue {
         displayedTemperature: "Screened Temp C",
         threshold: "Fever Threshold C",
         time: "Time",
-        result: "Screening Result"
+        result: "Screening Result",
       },
       `${this.selectedDevices
-        .map(device => this.devices[device].name.replace(/,/g, ""))
+        .map((device) => this.devices[device].name.replace(/,/g, ""))
         .join("|")} -- ${range}.csv`
     );
   }
@@ -390,9 +389,9 @@ export default class App extends Vue {
   async updateDeviceNames() {
     this.updatingDeviceNames = true;
     this.devices = Object.values(this.devices)
-      .map(item => ({
+      .map((item) => ({
         ...item,
-        name: item.name === "" ? item.id : item.name
+        name: item.name === "" ? item.id : item.name,
       }))
       .reduce((acc: Record<string, Device>, item: Device) => {
         acc[item.id] = item;
@@ -406,9 +405,9 @@ export default class App extends Vue {
   async updateAlertSettings() {
     this.updatingAlertSettings = true;
     this.devices = Object.values(this.devices)
-      .map(item => ({
+      .map((item) => ({
         ...item,
-        name: item.name === "" ? item.id : item.name
+        name: item.name === "" ? item.id : item.name,
       }))
       .reduce((acc: Record<string, Device>, item: Device) => {
         acc[item.id] = item;
@@ -417,6 +416,17 @@ export default class App extends Vue {
     await makePostRequest("/devices/update", this.devices);
     this.updatingAlertSettings = false;
     this.showAlertsDialog = false;
+  }
+
+  get selectedAllDevices() {
+    return this.selectedDevices.length === this.deviceIds.length;
+  }
+
+  get icon() {
+    if (this.selectedAllDevices) return "mdi-close-box";
+    if (this.selectedDevices.length > 0 && !this.selectedAllDevices)
+      return "mdi-minus-box";
+    return "mdi-checkbox-blank-outline";
   }
 
   get deviceIds(): { name: string; id: string }[] {
@@ -461,7 +471,7 @@ export default class App extends Vue {
   get events(): EventTableItem[] {
     return this.eventItems.map((eventItem: EventTableItem) => ({
       ...eventItem,
-      device: this.devices[eventItem.device].name
+      device: this.devices[eventItem.device].name,
     }));
   }
 
@@ -471,40 +481,40 @@ export default class App extends Vue {
 
   get resultsSummaryText(): string {
     return `${this.eventItems.length} total screenings, ${
-      this.eventItems.filter(item => item.result === "Fever").length
+      this.eventItems.filter((item) => item.result === "Fever").length
     } screened as Fever`;
   }
 
   get numNormalEvents(): number {
-    return this.eventItems.filter(item => item.result === "Normal").length;
+    return this.eventItems.filter((item) => item.result === "Normal").length;
   }
 
   get numErrorEvents(): number {
-    return this.eventItems.filter(item => item.result === "Error").length;
+    return this.eventItems.filter((item) => item.result === "Error").length;
   }
 
   get numFeverEvents(): number {
-    return this.eventItems.filter(item => item.result === "Fever").length;
+    return this.eventItems.filter((item) => item.result === "Fever").length;
   }
 
   // noinspection JSMismatchedCollectionQueryUpdate
   private headers: DataTableHeader[] = [
     {
       text: "Device",
-      value: "device"
+      value: "device",
     },
     {
       text: "Screened Temp C",
-      value: "displayedTemperature"
+      value: "displayedTemperature",
     },
     {
       text: "Fever Threshold C",
-      value: "threshold"
+      value: "threshold",
     },
     {
       text: "Time",
-      value: "time"
-    }
+      value: "time",
+    },
   ];
 
   getColorForItem(item: EventTableItem): string {
@@ -517,78 +527,21 @@ export default class App extends Vue {
     return "#11a84c";
   }
 
-  get chartOptions() {
-    return {
-      chart: {
-        offsetX: 0,
-        offsetY: 0,
-        id: "timeseries",
-        toolbar: {
-          show: false
-        },
-        animations: {
-          enabled: true,
-          speed: 400,
-          animateGradually: {
-            enabled: true,
-            delay: 16
-          }
-        }
-      },
-      fill: {
-        colors: [
-          ({ dataPointIndex }: { dataPointIndex: number }) =>
-            this.getColorForItem(this.eventItems[dataPointIndex])
-        ]
-      },
-      grid: {
-        show: false
-      },
-      dataLabels: {
-        enabled: false
-      },
-      tooltip: {
-        enabled: false
-      },
-      xaxis: {
-        type: "numeric",
-        labels: {
-          show: false
-        },
-        axisTicks: {
-          show: false
-        }
-      },
-      yaxis: {
-        labels: {
-          show: false
-        },
-        tickAmount: 10,
-        min: 30,
-        max: 50,
-        axisTicks: {
-          show: false
-        }
-      }
-    };
-  }
-
   get temperatures() {
     return [
       {
         name: "temperatures",
         data: this.eventItems.map(
           ({ displayedTemperature }) => displayedTemperature
-        )
-      }
+        ),
+      },
     ];
   }
 
   get userEmail(): string {
-    return (auth
-      .getCachedSession()
-      .getIdToken()
-      .decodePayload() as { email: string }).email;
+    return (auth.getCachedSession().getIdToken().decodePayload() as {
+      email: string;
+    }).email;
   }
 
   created() {
@@ -604,7 +557,7 @@ export default class App extends Vue {
       },
       onFailure: () => {
         auth.signOut();
-      }
+      },
     };
     auth.useCodeGrantFlow();
     // Or try and find an auth token in localStorage?
@@ -641,7 +594,7 @@ export default class App extends Vue {
           ].value;
         } else {
           const timespan = this.timespans.find(
-            timespan =>
+            (timespan) =>
               !Array.isArray(timespan.value) &&
               (timespan as { text: string; value: { start: number } }).value
                 .start === (config.timespan as { start: number }).start
@@ -654,7 +607,7 @@ export default class App extends Vue {
         // Do nothing
       }
       await this.fetchDevicesForUser();
-      this.selectedDevices = this.selectedDevices.filter(device =>
+      this.selectedDevices = this.selectedDevices.filter((device) =>
         Object.keys(this.devices).includes(device)
       );
       if (this.selectedDevices.length) {
@@ -699,8 +652,8 @@ export default class App extends Vue {
           if (range.endDate) {
             url += `&endDate=${range.endDate}`;
           }
-          makeGetRequest(url).then(response => {
-            response.json().then(result => resolve(result.Items));
+          makeGetRequest(url).then((response) => {
+            response.json().then((result) => resolve(result.Items));
           });
         })
       );
@@ -732,14 +685,13 @@ export default class App extends Vue {
                     : displayedTemp > threshold
                     ? "Fever"
                     : "Normal",
-                time: formatTime(d)
+                time: formatTime(d),
               });
             }
           )
         );
       }
     }
-
     this.eventItems = mappedEventData
       .filter((item: EventTableItem) => item.displayedTemperature > 0)
       .sort((a: EventTableItem, b: EventTableItem) =>
@@ -749,6 +701,16 @@ export default class App extends Vue {
     this.dataIsLoading = false;
   }
 
+  selectAllDevices() {
+    if (this.deviceIds.length === this.selectedDevices.length) {
+      this.selectedDevices = [];
+      this.selectedDevicesChanged([]);
+    } else {
+      const deviceIds = this.deviceIds.map((val) => val.id);
+      this.selectedDevices = deviceIds;
+      this.selectedDevicesChanged(deviceIds);
+    }
+  }
   async fetchDevicesForUser() {
     const devices = await makeGetRequest("/devices");
     this.devices = await devices.json();
@@ -766,7 +728,7 @@ export default class App extends Vue {
       "config",
       JSON.stringify({
         devices: deviceIds,
-        timespan: this.selectedTimespan
+        timespan: this.selectedTimespan,
       })
     );
     this.fetchEventsForDevices(deviceIds, this.dateRangeForSelectedTimespan);
@@ -786,7 +748,7 @@ export default class App extends Vue {
         devices: this.selectedDevices,
         timespan: this.isCustomTimespan
           ? this.timespans[this.timespans.length - 1].value
-          : timespan
+          : timespan,
       })
     );
 
@@ -828,6 +790,9 @@ export default class App extends Vue {
   flex-direction: row;
   align-items: baseline;
   justify-content: space-evenly;
+}
+.selectors {
+  min-height: 100px;
 }
 .event-summary {
   font-weight: bolder;
