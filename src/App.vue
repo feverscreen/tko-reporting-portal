@@ -214,75 +214,11 @@ import VueApexCharts from "vue-apexcharts";
 import ScreeningChart from "@/components/ScreeningChart.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
-import { formatTime } from "@/utils";
+import { formatTime, RequestHandler, Device, formatDate } from "@/utils";
+import { MIN_ERROR_THRESHOLD } from "@/constants";
 import downloadCsv from "download-csv";
 
 Vue.use(VueApexCharts);
-
-const hostName = `${window.location.protocol}//${window.location.host}`;
-const auth = new CognitoAuth({
-  ClientId: "7ijdj7d02sn1jmta9blul42373",
-  AppWebDomain: "tekahuora.auth.ap-southeast-2.amazoncognito.com",
-  TokenScopesArray: ["email", "openid", "aws.cognito.signin.user.admin"],
-  RedirectUriSignIn: hostName,
-  RedirectUriSignOut: hostName,
-});
-
-const MIN_ERROR_THRESHOLD = 42.5;
-const API_BASE =
-  "https://3pu8ojk2ej.execute-api.ap-southeast-2.amazonaws.com/default";
-// If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
-// Set the auth token for axios to use when the component is created.
-
-let lastApiRequestTime = 0;
-
-const makeRequest = async (
-  url: string,
-  method: string,
-  payload: any = undefined
-): Promise<Response> => {
-  const { exp } = auth.getCachedSession().getIdToken().decodePayload() as any;
-  const now = new Date().getTime() / 1000;
-  const hasExpired = now > exp;
-  if (hasExpired) {
-    window.location.reload();
-    // Should never happen.
-    return fetch(`${API_BASE}${url}`);
-  } else {
-    const options: any = {
-      method,
-      headers: {
-        Authorization: auth.getCachedSession().getIdToken().getJwtToken(),
-      },
-    };
-    if (method === "POST" && payload !== undefined) {
-      options.body = JSON.stringify(payload);
-    }
-    lastApiRequestTime = new Date().getTime();
-    return fetch(`${API_BASE}${url}`, options);
-  }
-};
-
-const makeGetRequest = async (url: string): Promise<Response> => {
-  return makeRequest(url, "GET");
-};
-
-const makePostRequest = async (
-  url: string,
-  payload: any
-): Promise<Response> => {
-  return makeRequest(url, "POST", payload);
-};
-
-const formatDate = (date: Date): string =>
-  date.toISOString().replace(/:/g, "_").replace(/\./g, "_");
-
-interface Device {
-  name: string;
-  id: string;
-  alerts: boolean;
-}
-
 interface EventTableItem {
   displayedTemperature: number;
   threshold: number;
@@ -305,6 +241,19 @@ interface SavedSettings {
   timespan: { start: number } | [string, string];
 }
 
+const hostName = `${window.location.protocol}//${window.location.host}`;
+
+const auth = new CognitoAuth({
+  ClientId: "7ijdj7d02sn1jmta9blul42373",
+  AppWebDomain: "tekahuora.auth.ap-southeast-2.amazoncognito.com",
+  TokenScopesArray: ["email", "openid", "aws.cognito.signin.user.admin"],
+  RedirectUriSignIn: hostName,
+  RedirectUriSignOut: hostName,
+});
+
+// If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
+// Set the auth token for axios to use when the component is created.
+
 @Component({
   components: { apexchart: ScreeningChart },
 })
@@ -322,6 +271,7 @@ export default class App extends Vue {
   private updatingDeviceNames = false;
   private showAlertsDialog = false;
   private updatingAlertSettings = false;
+  private requestHandler = RequestHandler(auth);
   private timespans = [
     {
       text: "Last hour",
@@ -340,14 +290,14 @@ export default class App extends Vue {
       value: ["2020-10-01", "2020-10-04"], // Concrete date ranges
     },
   ];
-  private selectedTimespan: { start: number } | string[] = this.timespans[1]
-    .value;
+  private selectedTimespan: { start: number } | string[] =
+    this.timespans[1].value;
 
   sortItems(
     items: EventTableItem[],
     index: (string | undefined)[],
     isDesc: (boolean | undefined)[]
-  ) {
+  ): EventTableItem[] {
     if (index[0] !== undefined && isDesc[0] !== undefined) {
       const i = index[0] === "time" ? "timestamp" : index[0];
       if (isDesc[0]) {
@@ -397,7 +347,7 @@ export default class App extends Vue {
         acc[item.id] = item;
         return acc;
       }, {} as Record<string, Device>);
-    await makePostRequest("/devices/update", this.devices);
+    await this.requestHandler.makePostRequest("/devices/update", this.devices);
     this.updatingDeviceNames = false;
     this.showDeviceNamesDialog = false;
   }
@@ -413,7 +363,7 @@ export default class App extends Vue {
         acc[item.id] = item;
         return acc;
       }, {} as Record<string, Device>);
-    await makePostRequest("/devices/update", this.devices);
+    await this.requestHandler.makePostRequest("/devices/update", this.devices);
     this.updatingAlertSettings = false;
     this.showAlertsDialog = false;
   }
@@ -539,14 +489,17 @@ export default class App extends Vue {
   }
 
   get userEmail(): string {
-    return (auth.getCachedSession().getIdToken().decodePayload() as {
-      email: string;
-    }).email;
+    return (
+      auth.getCachedSession().getIdToken().decodePayload() as {
+        email: string;
+      }
+    ).email;
   }
 
-  created() {
+  created(): void {
     auth.userhandler = {
-      onSuccess: (_session: CognitoAuthSession) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      onSuccess: (_session: CognitoAuthSession): void => {
         this.loggedInStatus.currentUser = auth.getCurrentUser();
         this.loggedInStatus.loggedIn = true;
         if (window.location.href.includes("?code=")) {
@@ -575,7 +528,7 @@ export default class App extends Vue {
     }
   }
 
-  async init() {
+  async init(): Promise<void> {
     // Should be signed in already:
     this.loggedInStatus.currentUser = auth.getCurrentUser();
     this.loggedInStatus.loggedIn = true;
@@ -589,9 +542,8 @@ export default class App extends Vue {
         if (Array.isArray(config.timespan)) {
           // Custom timespan:
           this.timespans[this.timespans.length - 1].value = config.timespan;
-          this.selectedTimespan = this.timespans[
-            this.timespans.length - 1
-          ].value;
+          this.selectedTimespan =
+            this.timespans[this.timespans.length - 1].value;
         } else {
           const timespan = this.timespans.find(
             (timespan) =>
@@ -623,7 +575,7 @@ export default class App extends Vue {
     // Periodically refresh.
     setInterval(async () => {
       const now = new Date().getTime();
-      if (now - lastApiRequestTime > 1000 * 50) {
+      if (now - this.requestHandler.lastApiRequestTime > 1000 * 50) {
         if (this.selectedDevices.length) {
           await this.fetchEventsForDevices(
             this.selectedDevices,
@@ -639,12 +591,12 @@ export default class App extends Vue {
   async fetchEventsForDevices(
     devices: string[],
     range: { startDate: string | null; endDate: string | null }
-  ) {
+  ): Promise<void> {
     const allEvents: Promise<DynamoEventItem[]>[] = [];
     this.dataIsLoading = true;
     for (const device of devices) {
       allEvents.push(
-        new Promise((resolve, reject) => {
+        new Promise((resolve) => {
           let url = `/events?deviceId=${device}&type=Screen`;
           if (range.startDate) {
             url += `&startDate=${range.startDate}`;
@@ -652,7 +604,7 @@ export default class App extends Vue {
           if (range.endDate) {
             url += `&endDate=${range.endDate}`;
           }
-          makeGetRequest(url).then((response) => {
+          this.requestHandler.makeGetRequest(url).then((response) => {
             response.json().then((result) => resolve(result.Items));
           });
         })
@@ -663,32 +615,30 @@ export default class App extends Vue {
     for (const deviceEvents of allEventData) {
       if (deviceEvents.length !== 0) {
         mappedEventData.push(
-          ...deviceEvents.map(
-            (item: DynamoEventItem): EventTableItem => {
-              const displayedTemp = item.disp;
-              const threshold = item.fth;
-              const date = item.tsc.replace(/_/g, ":");
-              const lastHyphen = date.lastIndexOf(":");
-              const d = new Date(
-                Date.parse(
-                  `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-                )
-              );
-              return Object.freeze({
-                device: item.uid,
-                timestamp: d,
-                displayedTemperature: Number(displayedTemp.toFixed(2)),
-                threshold: threshold,
-                result:
-                  displayedTemp > MIN_ERROR_THRESHOLD
-                    ? "Error"
-                    : displayedTemp > threshold
-                    ? "Fever"
-                    : "Normal",
-                time: formatTime(d),
-              });
-            }
-          )
+          ...deviceEvents.map((item: DynamoEventItem): EventTableItem => {
+            const displayedTemp = item.disp;
+            const threshold = item.fth;
+            const date = item.tsc.replace(/_/g, ":");
+            const lastHyphen = date.lastIndexOf(":");
+            const d = new Date(
+              Date.parse(
+                `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
+              )
+            );
+            return Object.freeze({
+              device: item.uid,
+              timestamp: d,
+              displayedTemperature: Number(displayedTemp.toFixed(2)),
+              threshold: threshold,
+              result:
+                displayedTemp > MIN_ERROR_THRESHOLD
+                  ? "Error"
+                  : displayedTemp > threshold
+                  ? "Fever"
+                  : "Normal",
+              time: formatTime(d),
+            });
+          })
         );
       }
     }
@@ -701,7 +651,7 @@ export default class App extends Vue {
     this.dataIsLoading = false;
   }
 
-  selectAllDevices() {
+  selectAllDevices(): void {
     if (this.deviceIds.length === this.selectedDevices.length) {
       this.selectedDevices = [];
       this.selectedDevicesChanged([]);
@@ -711,8 +661,8 @@ export default class App extends Vue {
       this.selectedDevicesChanged(deviceIds);
     }
   }
-  async fetchDevicesForUser() {
-    const devices = await makeGetRequest("/devices");
+  async fetchDevicesForUser(): Promise<void> {
+    const devices = await this.requestHandler.makeGetRequest("/devices");
     this.devices = await devices.json();
     if (Object.values(this.devices).length === 1) {
       this.selectedDevices = [Object.keys(this.devices)[0]];
@@ -723,7 +673,7 @@ export default class App extends Vue {
     }
   }
 
-  selectedDevicesChanged(deviceIds: string[]) {
+  selectedDevicesChanged(deviceIds: string[]): void {
     window.localStorage.setItem(
       "config",
       JSON.stringify({
@@ -741,7 +691,7 @@ export default class App extends Vue {
           end: Date | number | undefined;
         }
       | string[]
-  ) {
+  ): void {
     window.localStorage.setItem(
       "config",
       JSON.stringify({
@@ -763,7 +713,7 @@ export default class App extends Vue {
     }
   }
 
-  signOut() {
+  signOut(): void {
     auth.signOut();
   }
 }
@@ -807,8 +757,6 @@ export default class App extends Vue {
     font-size: 25px;
     line-height: 25px;
     padding-top: 30px;
-  }
-  > span:last-child {
   }
   &.normal {
     background: #11a84c;

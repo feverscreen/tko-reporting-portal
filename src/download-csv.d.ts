@@ -1,1 +1,1 @@
-declare module "download-csv"
+declare module "download-csv";
