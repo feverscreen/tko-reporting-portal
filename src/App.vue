@@ -62,7 +62,6 @@
           />
         </v-col>
       </v-row>
-
       <v-dialog
         ref="dialog"
         v-model="showDeviceNamesDialog"
@@ -214,7 +213,8 @@ import VueApexCharts from "vue-apexcharts";
 import ScreeningChart from "@/components/ScreeningChart.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
-import { formatTime, RequestHandler, Device, formatDate } from "@/utils";
+import { formatTime, formatDate } from "@/model/utils";
+import RequestHandler, { Device } from "@/model/request-handler";
 import { MIN_ERROR_THRESHOLD } from "@/constants";
 import downloadCsv from "download-csv";
 

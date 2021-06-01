@@ -1,4 +1,4 @@
-import { API_BASE } from "./constants";
+import { API_BASE } from "@/constants";
 import { CognitoAuth } from "amazon-cognito-auth-js";
 
 export interface Device {
@@ -7,7 +7,7 @@ export interface Device {
   alerts: boolean;
 }
 
-export function RequestHandler(auth: CognitoAuth) {
+export default function RequestHandler(auth: CognitoAuth) {
   return {
     lastApiRequestTime: 0,
     async makeRequest(
@@ -25,7 +25,7 @@ export function RequestHandler(auth: CognitoAuth) {
         // Should never happen.
         return fetch(`${API_BASE}${url}`);
       } else {
-        const options: any = {
+        const options: RequestInit = {
           method,
           headers: {
             Authorization: auth.getCachedSession().getIdToken().getJwtToken(),
@@ -49,10 +49,3 @@ export function RequestHandler(auth: CognitoAuth) {
     },
   };
 }
-
-export const formatTime = (d: Date): string => {
-  return `${d.toLocaleTimeString()} - ${d.toDateString()}`;
-};
-
-export const formatDate = (date: Date): string =>
-  date.toISOString().replace(/:/g, "_").replace(/\./g, "_");
