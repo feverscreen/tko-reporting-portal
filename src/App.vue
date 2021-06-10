@@ -62,6 +62,12 @@
           />
         </v-col>
       </v-row>
+      <v-dialog ref="dialog" v-model="showAlertsDialog" max-width="800">
+        <devicesOverview
+          :devices="devices"
+          :updateName="dbHandler.updatingDeviceNames"
+        />
+      </v-dialog>
       <v-dialog
         ref="dialog"
         v-model="showDeviceNamesDialog"
@@ -93,12 +99,7 @@
           </v-card-actions>
         </v-card>
       </v-dialog>
-      <v-dialog
-        ref="dialog"
-        v-model="showAlertsDialog"
-        persistent
-        max-width="320"
-      >
+      <v-dialog ref="dialog" max-width="320">
         <v-card :loading="updatingAlertSettings">
           <v-card-title>Device alerts</v-card-title>
           <v-card-subtitle align="left"
@@ -211,51 +212,42 @@
 import { Component, Vue } from "vue-property-decorator";
 import VueApexCharts from "vue-apexcharts";
 import ScreeningChart from "@/components/ScreeningChart.component.vue";
+import devicesOverview from "@/components/DevicesOverview.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
 import { formatTime, formatDate } from "@/model/utils";
-import RequestHandler, { Device } from "@/model/request-handler";
+import RequestHandler from "@/model/request-handler";
+import DatabaseHandler, {
+  Device,
+  EventTableItem,
+  DynamoEventItem,
+} from "@/model/db-handler";
+import CognitoIdentity from "@/model/cognito-identity";
 import { MIN_ERROR_THRESHOLD } from "@/constants";
 import downloadCsv from "download-csv";
 
 Vue.use(VueApexCharts);
-interface EventTableItem {
-  displayedTemperature: number;
-  threshold: number;
-  result: "Fever" | "Normal" | "Error";
-  timestamp: Date;
-  device: string;
-  time: string;
-  [key: string]: string | number | Date;
-}
 
-interface DynamoEventItem {
-  disp: number;
-  fth: number;
-  tsc: string;
-  uid: string;
-}
+const HostName = `${window.location.protocol}//${window.location.host}`;
+
+const auth = new CognitoAuth({
+  ClientId: "7ijdj7d02sn1jmta9blul42373",
+  AppWebDomain: "tekahuora.auth.ap-southeast-2.amazoncognito.com",
+  TokenScopesArray: ["email", "openid", "aws.cognito.signin.user.admin"],
+  RedirectUriSignIn: HostName,
+  RedirectUriSignOut: HostName,
+});
 
 interface SavedSettings {
   devices: string[];
   timespan: { start: number } | [string, string];
 }
 
-const hostName = `${window.location.protocol}//${window.location.host}`;
-
-const auth = new CognitoAuth({
-  ClientId: "7ijdj7d02sn1jmta9blul42373",
-  AppWebDomain: "tekahuora.auth.ap-southeast-2.amazoncognito.com",
-  TokenScopesArray: ["email", "openid", "aws.cognito.signin.user.admin"],
-  RedirectUriSignIn: hostName,
-  RedirectUriSignOut: hostName,
-});
-
 // If the API response returns 401, logout so that they'll be redirected to the cognito sign-in page.
 // Set the auth token for axios to use when the component is created.
 
 @Component({
-  components: { apexchart: ScreeningChart },
+  components: { apexchart: ScreeningChart, devicesOverview },
 })
 export default class App extends Vue {
   private loggedInStatus: {
@@ -272,6 +264,11 @@ export default class App extends Vue {
   private showAlertsDialog = false;
   private updatingAlertSettings = false;
   private requestHandler = RequestHandler(auth);
+  private cognitoIdentity = CognitoIdentity(auth);
+  private dbHandler = DatabaseHandler(
+    this.cognitoIdentity.credentials,
+    auth.getCurrentUser()
+  );
   private timespans = [
     {
       text: "Last hour",
@@ -348,6 +345,7 @@ export default class App extends Vue {
         return acc;
       }, {} as Record<string, Device>);
     await this.requestHandler.makePostRequest("/devices/update", this.devices);
+    this.dbHandler.updateDeviceName("fs-1204", "New");
     this.updatingDeviceNames = false;
     this.showDeviceNamesDialog = false;
   }
@@ -419,6 +417,8 @@ export default class App extends Vue {
   }
 
   get events(): EventTableItem[] {
+    this.dbHandler.getDeviceEvents("fs-1217", { start: "", end: "" });
+
     return this.eventItems.map((eventItem: EventTableItem) => ({
       ...eventItem,
       device: this.devices[eventItem.device].name,
@@ -503,7 +503,7 @@ export default class App extends Vue {
         this.loggedInStatus.currentUser = auth.getCurrentUser();
         this.loggedInStatus.loggedIn = true;
         if (window.location.href.includes("?code=")) {
-          window.location.href = hostName;
+          window.location.href = HostName;
         } else {
           this.init();
         }
@@ -662,6 +662,7 @@ export default class App extends Vue {
     }
   }
   async fetchDevicesForUser(): Promise<void> {
+    this.dbHandler.getDevices();
     const devices = await this.requestHandler.makeGetRequest("/devices");
     this.devices = await devices.json();
     if (Object.values(this.devices).length === 1) {

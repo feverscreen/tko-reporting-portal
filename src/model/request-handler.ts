@@ -1,11 +1,6 @@
 import { API_BASE } from "@/constants";
 import { CognitoAuth } from "amazon-cognito-auth-js";
-
-export interface Device {
-  name: string;
-  id: string;
-  alerts: boolean;
-}
+import { Device } from "@/model/db-handler";
 
 export default function RequestHandler(auth: CognitoAuth) {
   return {
