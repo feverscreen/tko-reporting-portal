@@ -1,39 +1,36 @@
 <template>
   <v-app v-if="loggedInStatus.loggedIn">
     <v-app-bar color="white" app>
-      <div class="logo"></div>
+      <div class="logo" />
       <v-spacer />
       {{ userEmail }}
       <span>&nbsp;</span>
-      <v-btn @click="signOut" text color="#086797">Sign out</v-btn>
+      <v-btn text color="#086797" @click="signOut"> Sign out </v-btn>
     </v-app-bar>
     <v-container>
       <v-row align="center">
         <v-toolbar flat>
           <v-spacer />
-          <v-btn text @click="showAlertsDialog = true"> Device alerts </v-btn>
-          <v-btn text @click="showDeviceNamesDialog = true">
-            Device names
-          </v-btn>
-          <v-btn @click="exportCsv" text>Export CSV</v-btn>
+          <v-btn text @click="showDevicesOverview = true"> Edit Devices </v-btn>
+          <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
       <v-row align="center">
         <v-col>
           <v-select
+            v-model="selectedDevices"
             class="selectors"
             label="devices"
             :items="deviceIds"
-            v-model="selectedDevices"
             item-text="name"
             item-value="id"
-            @change="selectedDevicesChanged"
             multiple
             chips
             filled
             light
+            @change="selectedDevicesChanged"
           >
-            <template v-slot:prepend-item>
+            <template #prepend-item>
               <v-list-item ripple @click="selectAllDevices">
                 <v-list-item-action>
                   <v-icon
@@ -46,93 +43,42 @@
                   <v-list-item-title> Select All </v-list-item-title>
                 </v-list-item-content>
               </v-list-item>
-              <v-divider class="mt-2"></v-divider>
+              <v-divider class="mt-2" />
             </template>
           </v-select>
         </v-col>
         <v-col>
           <v-select
+            v-model="selectedTimespan"
             height="68"
             label="timespan"
             :items="timespans"
             filled
             light
-            v-model="selectedTimespan"
             @change="selectedTimespanChanged"
           />
         </v-col>
       </v-row>
-      <v-dialog ref="dialog" v-model="showAlertsDialog" max-width="800">
+      <v-dialog ref="dialog" v-model="showDevicesOverview" max-width="800">
         <devicesOverview
-          :devices="devices"
-          :updateName="dbHandler.updatingDeviceNames"
+          :devices="Object.values(devices)"
+          :isAdmin="isAdmin"
+          :invitedUsers="invitedUsers"
+          :updateDeviceName="dbHandler.updateDeviceName"
+          :update-device-alerts="dbHandler.updateDeviceAlerts"
+          :toggle-device-for-user="dbHandler.toggleDeviceForUser"
         />
-      </v-dialog>
-      <v-dialog
-        ref="dialog"
-        v-model="showDeviceNamesDialog"
-        persistent
-        max-width="500"
-      >
-        <v-card :loading="updatingDeviceNames">
-          <v-card-title>Device naming</v-card-title>
-          <v-card-subtitle align="left"
-            >Give your screening devices friendly names i.e "Staff Kitchen",
-            "Reception".</v-card-subtitle
-          >
-          <v-card-text>
-            <v-text-field
-              v-for="device in devices"
-              :key="device.id"
-              :label="device.id"
-              v-model="device.name"
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn text color="primary" @click="showDeviceNamesDialog = false">
-              Cancel
-            </v-btn>
-            <v-btn text color="primary" @click="updateDeviceNames">
-              Save
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-      <v-dialog ref="dialog" max-width="320">
-        <v-card :loading="updatingAlertSettings">
-          <v-card-title>Device alerts</v-card-title>
-          <v-card-subtitle align="left"
-            >Enable email alerts per device.</v-card-subtitle
-          >
-          <v-card-text>
-            <v-row v-for="device in devices" :key="device.id">
-              <v-col>
-                <v-switch :label="`${device.name}`" v-model="device.alerts" />
-              </v-col>
-            </v-row>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn text color="primary" @click="showAlertsDialog = false">
-              Cancel
-            </v-btn>
-            <v-btn text color="primary" @click="updateAlertSettings">
-              Save
-            </v-btn>
-          </v-card-actions>
-        </v-card>
       </v-dialog>
       <v-row v-if="isCustomTimespan" align="center">
         <v-dialog
           ref="dialog"
           v-model="showDateRangePicker"
           :return-value.sync="timespans[timespans.length - 1].value"
-          @input="selectedTimespanChanged"
           persistent
           width="290px"
+          @input="selectedTimespanChanged"
         >
-          <template v-slot:activator="{ on, attrs }">
+          <template #activator="{ on, attrs }">
             <v-text-field
               :value="timespans[timespans.length - 1].value.join(' - ')"
               label="Custom date range"
@@ -163,26 +109,26 @@
         </div>
         <div v-else-if="eventItems.length !== 0" class="summary-bubbles">
           <h4>{{ eventItems.length }} screenings</h4>
-          <div class="event-summary normal" v-if="numNormalEvents !== 0">
+          <div v-if="numNormalEvents !== 0" class="event-summary normal">
             <span>
               {{ numNormalEvents }}
             </span>
             <span>normal</span>
           </div>
-          <div class="event-summary fever" v-if="numFeverEvents !== 0">
+          <div v-if="numFeverEvents !== 0" class="event-summary fever">
             <span>{{ numFeverEvents }}</span>
             <span>fever</span>
           </div>
-          <div class="event-summary errored" v-if="numErrorEvents !== 0">
+          <div v-if="numErrorEvents !== 0" class="event-summary errored">
             <span> {{ numErrorEvents }} </span><span>errors</span>
           </div>
         </div>
       </v-row>
-      <v-row align="center" v-if="selectedTimespan && selectedDevices.length">
+      <v-row v-if="selectedTimespan && selectedDevices.length" align="center">
         <v-col>
           <apexchart
             :temperatures="temperatures"
-            :getColorForItem="getColorForItem"
+            :get-color-for-item="getColorForItem"
           />
           <v-data-table
             fixed-header
@@ -196,7 +142,7 @@
             hide-default-footer
             :no-data-text="'No events found for selected timespan'"
           >
-            <template v-slot:[`item.displayedTemperature`]="{ item }">
+            <template #[`item.displayedTemperature`]="{ item }">
               <v-chip :color="getColorForItem(item)" dark>
                 {{ item.displayedTemperature }}
               </v-chip>
@@ -221,6 +167,7 @@ import DatabaseHandler, {
   Device,
   EventTableItem,
   DynamoEventItem,
+  User,
 } from "@/model/db-handler";
 import CognitoIdentity from "@/model/cognito-identity";
 import { MIN_ERROR_THRESHOLD } from "@/constants";
@@ -237,6 +184,12 @@ const auth = new CognitoAuth({
   RedirectUriSignIn: HostName,
   RedirectUriSignOut: HostName,
 });
+const cognitoIdentity = CognitoIdentity(auth);
+const dbHandler = DatabaseHandler(
+  auth.getUsername(),
+  cognitoIdentity.credentials,
+  cognitoIdentity.isAdmin
+);
 
 interface SavedSettings {
   devices: string[];
@@ -255,20 +208,15 @@ export default class App extends Vue {
     currentUser: string | null;
   } = { loggedIn: false, currentUser: null };
   private devices: Record<string, Device> = {};
+  private invitedUsers: User[] = [];
   private selectedDevices: string[] = [];
   private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
   private showDateRangePicker = false;
-  private showDeviceNamesDialog = false;
-  private updatingDeviceNames = false;
-  private showAlertsDialog = false;
-  private updatingAlertSettings = false;
+  private showDevicesOverview = false;
   private requestHandler = RequestHandler(auth);
-  private cognitoIdentity = CognitoIdentity(auth);
-  private dbHandler = DatabaseHandler(
-    this.cognitoIdentity.credentials,
-    auth.getCurrentUser()
-  );
+  private dbHandler = dbHandler;
+  private isAdmin = cognitoIdentity.isAdmin;
   private timespans = [
     {
       text: "Last hour",
@@ -287,8 +235,8 @@ export default class App extends Vue {
       value: ["2020-10-01", "2020-10-04"], // Concrete date ranges
     },
   ];
-  private selectedTimespan: { start: number } | string[] =
-    this.timespans[1].value;
+  private selectedTimespan: { start: number } | string[] = this.timespans[1]
+    .value;
 
   sortItems(
     items: EventTableItem[],
@@ -333,39 +281,6 @@ export default class App extends Vue {
     );
   }
 
-  async updateDeviceNames() {
-    this.updatingDeviceNames = true;
-    this.devices = Object.values(this.devices)
-      .map((item) => ({
-        ...item,
-        name: item.name === "" ? item.id : item.name,
-      }))
-      .reduce((acc: Record<string, Device>, item: Device) => {
-        acc[item.id] = item;
-        return acc;
-      }, {} as Record<string, Device>);
-    await this.requestHandler.makePostRequest("/devices/update", this.devices);
-    this.dbHandler.updateDeviceName("fs-1204", "New");
-    this.updatingDeviceNames = false;
-    this.showDeviceNamesDialog = false;
-  }
-
-  async updateAlertSettings() {
-    this.updatingAlertSettings = true;
-    this.devices = Object.values(this.devices)
-      .map((item) => ({
-        ...item,
-        name: item.name === "" ? item.id : item.name,
-      }))
-      .reduce((acc: Record<string, Device>, item: Device) => {
-        acc[item.id] = item;
-        return acc;
-      }, {} as Record<string, Device>);
-    await this.requestHandler.makePostRequest("/devices/update", this.devices);
-    this.updatingAlertSettings = false;
-    this.showAlertsDialog = false;
-  }
-
   get selectedAllDevices() {
     return this.selectedDevices.length === this.deviceIds.length;
   }
@@ -378,7 +293,7 @@ export default class App extends Vue {
   }
 
   get deviceIds(): { name: string; id: string }[] {
-    return Object.values(this.devices);
+    return Object.values(this.devices).filter(({ disable }) => !disable);
   }
 
   get dateRangeForSelectedTimespan(): {
@@ -417,7 +332,7 @@ export default class App extends Vue {
   }
 
   get events(): EventTableItem[] {
-    this.dbHandler.getDeviceEvents("fs-1217", { start: "", end: "" });
+    dbHandler.getDeviceEvents("fs-1217", { start: "", end: "" });
 
     return this.eventItems.map((eventItem: EventTableItem) => ({
       ...eventItem,
@@ -489,11 +404,9 @@ export default class App extends Vue {
   }
 
   get userEmail(): string {
-    return (
-      auth.getCachedSession().getIdToken().decodePayload() as {
-        email: string;
-      }
-    ).email;
+    return (auth.getCachedSession().getIdToken().decodePayload() as {
+      email: string;
+    }).email;
   }
 
   created(): void {
@@ -533,6 +446,9 @@ export default class App extends Vue {
     this.loggedInStatus.currentUser = auth.getCurrentUser();
     this.loggedInStatus.loggedIn = true;
 
+    this.invitedUsers = await dbHandler.getInvitedUsers();
+    this.invitedUsers = this.invitedUsers;
+
     // Load config from localStorage:
     const configRaw = window.localStorage.getItem("config");
     if (configRaw !== null) {
@@ -542,8 +458,9 @@ export default class App extends Vue {
         if (Array.isArray(config.timespan)) {
           // Custom timespan:
           this.timespans[this.timespans.length - 1].value = config.timespan;
-          this.selectedTimespan =
-            this.timespans[this.timespans.length - 1].value;
+          this.selectedTimespan = this.timespans[
+            this.timespans.length - 1
+          ].value;
         } else {
           const timespan = this.timespans.find(
             (timespan) =>
@@ -558,7 +475,7 @@ export default class App extends Vue {
       } catch (e) {
         // Do nothing
       }
-      await this.fetchDevicesForUser();
+      this.devices = await dbHandler.getDevices();
       this.selectedDevices = this.selectedDevices.filter((device) =>
         Object.keys(this.devices).includes(device)
       );
@@ -569,7 +486,7 @@ export default class App extends Vue {
         );
       }
     } else {
-      await this.fetchDevicesForUser();
+      this.devices = await dbHandler.getDevices();
     }
 
     // Periodically refresh.
@@ -582,7 +499,7 @@ export default class App extends Vue {
             this.dateRangeForSelectedTimespan
           );
         } else {
-          await this.fetchDevicesForUser();
+          this.devices = await dbHandler.getDevices();
         }
       }
     }, 1000 * 60);
@@ -615,30 +532,32 @@ export default class App extends Vue {
     for (const deviceEvents of allEventData) {
       if (deviceEvents.length !== 0) {
         mappedEventData.push(
-          ...deviceEvents.map((item: DynamoEventItem): EventTableItem => {
-            const displayedTemp = item.disp;
-            const threshold = item.fth;
-            const date = item.tsc.replace(/_/g, ":");
-            const lastHyphen = date.lastIndexOf(":");
-            const d = new Date(
-              Date.parse(
-                `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-              )
-            );
-            return Object.freeze({
-              device: item.uid,
-              timestamp: d,
-              displayedTemperature: Number(displayedTemp.toFixed(2)),
-              threshold: threshold,
-              result:
-                displayedTemp > MIN_ERROR_THRESHOLD
-                  ? "Error"
-                  : displayedTemp > threshold
-                  ? "Fever"
-                  : "Normal",
-              time: formatTime(d),
-            });
-          })
+          ...deviceEvents.map(
+            (item: DynamoEventItem): EventTableItem => {
+              const displayedTemp = item.disp;
+              const threshold = item.fth;
+              const date = item.tsc.replace(/_/g, ":");
+              const lastHyphen = date.lastIndexOf(":");
+              const d = new Date(
+                Date.parse(
+                  `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
+                )
+              );
+              return Object.freeze({
+                device: item.uid,
+                timestamp: d,
+                displayedTemperature: Number(displayedTemp.toFixed(2)),
+                threshold: threshold,
+                result:
+                  displayedTemp > MIN_ERROR_THRESHOLD
+                    ? "Error"
+                    : displayedTemp > threshold
+                    ? "Fever"
+                    : "Normal",
+                time: formatTime(d),
+              });
+            }
+          )
         );
       }
     }
@@ -661,19 +580,6 @@ export default class App extends Vue {
       this.selectedDevicesChanged(deviceIds);
     }
   }
-  async fetchDevicesForUser(): Promise<void> {
-    this.dbHandler.getDevices();
-    const devices = await this.requestHandler.makeGetRequest("/devices");
-    this.devices = await devices.json();
-    if (Object.values(this.devices).length === 1) {
-      this.selectedDevices = [Object.keys(this.devices)[0]];
-      await this.fetchEventsForDevices(
-        this.selectedDevices,
-        this.dateRangeForSelectedTimespan
-      );
-    }
-  }
-
   selectedDevicesChanged(deviceIds: string[]): void {
     window.localStorage.setItem(
       "config",

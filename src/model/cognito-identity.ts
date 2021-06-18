@@ -15,16 +15,22 @@ import { CognitoIdentityCredentialProvider } from "@aws-sdk/credential-provider-
 export default function CognitoIdentity(auth: CognitoAuth) {
   const config: CognitoIdentityClientConfig = { region };
   const client = new CognitoIdentityClient(config);
-  const idToken = auth.getCachedSession().getIdToken().getJwtToken();
-  const loginData = { [cognitoId]: idToken };
+  const idToken = auth.getCachedSession().getIdToken();
+  const loginData = { [cognitoId]: idToken.getJwtToken() };
   const credentials = fromCognitoIdentityPool({
     client,
     identityPoolId,
     logins: { ...loginData },
   });
+
   return {
     get credentials() {
       return credentials as CognitoIdentityCredentialProvider;
     },
+    get isAdmin() {
+      const groups = (idToken.decodePayload() as {["cognito:groups"]: string[]})["cognito:groups"] as string[]
+      const isAdmin = groups ? groups.includes("Admin") : false;
+      return isAdmin
+    }
   };
 }
