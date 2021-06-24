@@ -15,7 +15,75 @@
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
-      <v-row align="center">
+      <v-dialog
+        ref="dialog"
+        v-model="showDevicesOverview"
+        :max-width="isAdmin ? 800 : 450"
+      >
+        <devicesOverview
+          :devices="Object.values(devices)"
+          :isAdmin="isAdmin"
+          :invitedUsers="invitedUsers"
+          :updateDeviceName="dbHandler.updateDeviceName"
+          :update-device-alerts="dbHandler.updateDeviceAlerts"
+          :toggle-device-for-user="dbHandler.toggleDeviceForUser"
+        />
+      </v-dialog>
+      <v-row>
+        <v-col>
+          <v-btn-toggle
+            class="pt-3"
+            v-model="selectedTimespan"
+            mandatory
+            @change="selectedTimespanChanged"
+          >
+            <v-btn :value="timespans[0].value">Last Hour</v-btn>
+            <v-btn :value="timespans[1].value">Today</v-btn>
+            <v-btn :value="timespans[2].value">This Week</v-btn>
+            <v-btn
+              :value="timespans[3].value"
+              @click="showDateRangePicker = true"
+              >Custom</v-btn
+            >
+          </v-btn-toggle>
+          <v-row v-if="isCustomTimespan">
+            <v-dialog ref="dialog" v-model="showDateRangePicker" width="290px">
+              <template #activator="{ on, attrs }">
+                <v-row align="center" class="mx-16">
+                  <v-text-field
+                    :value="timespans[timespans.length - 1].value[0]"
+                    style="width: 8em"
+                    class="pr-2"
+                    label="Custom date range"
+                    prepend-icon="mdi-calendar"
+                    readonly
+                    v-bind="attrs"
+                    v-on="on"
+                  />
+                  <v-text-field
+                    :value="timespans[timespans.length - 1].value[1]"
+                    style="width: 8em"
+                    readonly
+                    v-bind="attrs"
+                    v-on="on"
+                  />
+                </v-row>
+              </template>
+              <v-date-picker
+                v-model="timespans[timespans.length - 1].value"
+                range
+              >
+                <v-spacer />
+                <v-btn text color="primary" v-on:click="cancelCustomTime">
+                  Cancel
+                </v-btn>
+                <v-btn text color="primary" v-on:click="saveCustomTime">
+                  OK
+                </v-btn>
+              </v-date-picker>
+            </v-dialog>
+          </v-row>
+        </v-col>
         <v-col>
           <v-select
             v-model="selectedDevices"
@@ -47,61 +115,6 @@
             </template>
           </v-select>
         </v-col>
-        <v-col>
-          <v-select
-            v-model="selectedTimespan"
-            height="68"
-            label="timespan"
-            :items="timespans"
-            filled
-            light
-            @change="selectedTimespanChanged"
-          />
-        </v-col>
-      </v-row>
-      <v-dialog ref="dialog" v-model="showDevicesOverview" max-width="800">
-        <devicesOverview
-          :devices="Object.values(devices)"
-          :isAdmin="isAdmin"
-          :invitedUsers="invitedUsers"
-          :updateDeviceName="dbHandler.updateDeviceName"
-          :update-device-alerts="dbHandler.updateDeviceAlerts"
-          :toggle-device-for-user="dbHandler.toggleDeviceForUser"
-        />
-      </v-dialog>
-      <v-row v-if="isCustomTimespan" align="center">
-        <v-dialog
-          ref="dialog"
-          v-model="showDateRangePicker"
-          :return-value.sync="timespans[timespans.length - 1].value"
-          persistent
-          width="290px"
-          @input="selectedTimespanChanged"
-        >
-          <template #activator="{ on, attrs }">
-            <v-text-field
-              :value="timespans[timespans.length - 1].value.join(' - ')"
-              label="Custom date range"
-              prepend-icon="mdi-calendar"
-              readonly
-              v-bind="attrs"
-              v-on="on"
-            />
-          </template>
-          <v-date-picker v-model="timespans[timespans.length - 1].value" range>
-            <v-spacer />
-            <v-btn text color="primary" @click="showDateRangePicker = false">
-              Cancel
-            </v-btn>
-            <v-btn
-              text
-              color="primary"
-              @click="$refs.dialog.save(timespans[timespans.length - 1].value)"
-            >
-              OK
-            </v-btn>
-          </v-date-picker>
-        </v-dialog>
       </v-row>
       <v-row v-if="selectedTimespan && selectedDevices.length">
         <div v-if="dataIsLoading && !eventItems.length" class="summary-bubbles">
@@ -135,11 +148,10 @@
             :loading="dataIsLoading"
             :headers="headers"
             :items="events"
-            :items-per-page="eventItems.length"
+            :items-per-page="10"
             sort-by="time"
             sort-desc
             :custom-sort="sortItems"
-            hide-default-footer
             :no-data-text="'No events found for selected timespan'"
           >
             <template #[`item.displayedTemperature`]="{ item }">
@@ -161,12 +173,11 @@ import ScreeningChart from "@/components/ScreeningChart.component.vue";
 import devicesOverview from "@/components/DevicesOverview.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
-import { formatTime, formatDate } from "@/model/utils";
+import { formatDate } from "@/model/utils";
 import RequestHandler from "@/model/request-handler";
 import DatabaseHandler, {
   Device,
   EventTableItem,
-  DynamoEventItem,
   User,
 } from "@/model/db-handler";
 import CognitoIdentity from "@/model/cognito-identity";
@@ -190,6 +201,10 @@ const dbHandler = DatabaseHandler(
   cognitoIdentity.credentials,
   cognitoIdentity.isAdmin
 );
+const today = new Date();
+const todayDate = `${today.getFullYear()}-${
+  today.getMonth() + 1
+}-${today.getDate()}`;
 
 interface SavedSettings {
   devices: string[];
@@ -217,6 +232,8 @@ export default class App extends Vue {
   private requestHandler = RequestHandler(auth);
   private dbHandler = dbHandler;
   private isAdmin = cognitoIdentity.isAdmin;
+  private toggleTimespan = 0;
+
   private timespans = [
     {
       text: "Last hour",
@@ -227,23 +244,185 @@ export default class App extends Vue {
       value: { start: -24 },
     },
     {
-      text: "Last week",
+      text: "This week",
       value: { start: -(24 * 7) },
     },
     {
       text: "Custom",
-      value: ["2020-10-01", "2020-10-04"], // Concrete date ranges
+      value: [todayDate, todayDate], // Concrete date ranges
     },
   ];
-  private selectedTimespan: { start: number } | string[] = this.timespans[1]
-    .value;
+
+  private selectedTimespan: { start: number } | string[] =
+    this.timespans[1].value;
+
+  // noinspection JSMismatchedCollectionQueryUpdate
+  private headers: DataTableHeader[] = [
+    {
+      text: "Device",
+      value: "device",
+      width: 240,
+    },
+    {
+      text: "Screened Temp C",
+      value: "displayedTemperature",
+      width: 140,
+    },
+    {
+      text: "Fever Threshold C",
+      value: "threshold",
+      width: 120,
+    },
+    {
+      text: "Time",
+      value: "time",
+      width: 240,
+    },
+  ];
+
+  get selectedAllDevices() {
+    return this.selectedDevices.length === this.deviceIds.length;
+  }
+
+  get icon() {
+    if (this.selectedAllDevices) return "mdi-close-box";
+    if (this.selectedDevices.length > 0 && !this.selectedAllDevices)
+      return "mdi-minus-box";
+    return "mdi-checkbox-blank-outline";
+  }
+
+  get deviceIds(): { name: string; id: string }[] {
+    return Object.values(this.devices).filter(({ disable }) => !disable);
+  }
+
+  get dateRangeForSelectedTimespan(): {
+    startDate: string;
+    endDate?: string;
+  } {
+    if (!Array.isArray(this.selectedTimespan) && this.selectedTimespan.start) {
+      const range = this.selectedTimespan;
+      // we have a relative range.
+      const startDate = formatDate(
+        new Date(new Date().getTime() + 1000 * 60 * 60 * range.start)
+      );
+      return { startDate };
+    } else {
+      const customRange = this.timespans[this.timespans.length - 1]
+        .value as string[];
+      let [start, end] = customRange;
+      if (end < start) {
+        // Make sure end is always greater or equal than start.
+        start = end;
+        end = start;
+      }
+
+      // Add timezone offsets for NZ
+      const offset = new Date().getTimezoneOffset() * 60 * 1000;
+      const startDate = formatDate(new Date(Date.parse(start) + offset));
+      const endDate = formatDate(
+        new Date(Date.parse(end) + 1000 * 60 * 60 * 24 + offset)
+      );
+      return { startDate, endDate };
+    }
+  }
+
+  get events(): EventTableItem[] {
+    dbHandler.getDeviceEvents("fs-1217", { startDate: "", endDate: "" });
+
+    return this.eventItems.map((eventItem: EventTableItem) => ({
+      ...eventItem,
+      device: this.devices[eventItem.device].name,
+    }));
+  }
+
+  get isCustomTimespan(): boolean {
+    return Array.isArray(this.selectedTimespan);
+  }
+
+  get resultsSummaryText(): string {
+    return `${this.eventItems.length} total screenings, ${
+      this.eventItems.filter((item) => item.result === "Fever").length
+    } screened as Fever`;
+  }
+
+  get numNormalEvents(): number {
+    return this.eventItems.filter((item) => item.result === "Normal").length;
+  }
+
+  get numErrorEvents(): number {
+    return this.eventItems.filter((item) => item.result === "Error").length;
+  }
+
+  get numFeverEvents(): number {
+    return this.eventItems.filter((item) => item.result === "Fever").length;
+  }
+
+  get temperatures() {
+    return [
+      {
+        name: "temperatures",
+        data: this.eventItems.map(
+          ({ displayedTemperature }) => displayedTemperature
+        ),
+      },
+    ];
+  }
+
+  get userEmail(): string {
+    return (
+      auth.getCachedSession().getIdToken().decodePayload() as {
+        email: string;
+      }
+    ).email;
+  }
+
+  cancelCustomTime() {
+    this.showDateRangePicker = false;
+  }
+
+  saveCustomTime() {
+    this.selectedTimespanChanged(this.selectedTimespan as string[]);
+    this.showDateRangePicker = false;
+  }
+
+  created(): void {
+    auth.userhandler = {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      onSuccess: (_session: CognitoAuthSession): void => {
+        this.loggedInStatus.currentUser = auth.getCurrentUser();
+        this.loggedInStatus.loggedIn = true;
+        if (window.location.href.includes("?code=")) {
+          window.location.href = HostName;
+        } else {
+          this.init();
+        }
+      },
+      onFailure: () => {
+        auth.signOut();
+      },
+    };
+    auth.useCodeGrantFlow();
+    // Or try and find an auth token in localStorage?
+    if (window.location.href.includes("?code=")) {
+      auth.parseCognitoWebResponse(window.location.href);
+    } else if (!auth.isUserSignedIn()) {
+      setTimeout(() => {
+        if (!auth.isUserSignedIn()) {
+          // This triggers a redirect to the login page.
+          auth.getSession();
+        }
+      }, 1000);
+    } else {
+      auth.getSession();
+    }
+  }
 
   sortItems(
     items: EventTableItem[],
     index: (string | undefined)[],
     isDesc: (boolean | undefined)[]
   ): EventTableItem[] {
-    if (index[0] !== undefined && isDesc[0] !== undefined) {
+    if (index[0] !== undefined) {
       const i = index[0] === "time" ? "timestamp" : index[0];
       if (isDesc[0]) {
         items.sort((a: EventTableItem, b: EventTableItem) =>
@@ -281,107 +460,6 @@ export default class App extends Vue {
     );
   }
 
-  get selectedAllDevices() {
-    return this.selectedDevices.length === this.deviceIds.length;
-  }
-
-  get icon() {
-    if (this.selectedAllDevices) return "mdi-close-box";
-    if (this.selectedDevices.length > 0 && !this.selectedAllDevices)
-      return "mdi-minus-box";
-    return "mdi-checkbox-blank-outline";
-  }
-
-  get deviceIds(): { name: string; id: string }[] {
-    return Object.values(this.devices).filter(({ disable }) => !disable);
-  }
-
-  get dateRangeForSelectedTimespan(): {
-    startDate: string | null;
-    endDate: string | null;
-  } {
-    let startDate: string | null = null;
-    let endDate: string | null = null;
-    if (!Array.isArray(this.selectedTimespan) && this.selectedTimespan.start) {
-      const range = this.selectedTimespan;
-      // we have a relative range.
-      startDate = formatDate(
-        new Date(new Date().getTime() + 1000 * 60 * 60 * range.start)
-      );
-    } else if (Array.isArray(this.selectedTimespan)) {
-      const customRange = this.timespans[this.timespans.length - 1]
-        .value as string[];
-      startDate = customRange[0];
-      endDate = customRange[1];
-      if (endDate < startDate) {
-        // Make sure end is always greater or equal than start.
-        const temp = startDate;
-        startDate = endDate;
-        endDate = temp;
-      }
-
-      // Add timezone offsets for NZ
-      const offset = new Date().getTimezoneOffset() * 60 * 1000;
-      startDate = formatDate(new Date(Date.parse(startDate) + offset));
-      endDate = formatDate(
-        new Date(Date.parse(endDate) + 1000 * 60 * 60 * 24 + offset)
-      );
-    }
-
-    return { startDate, endDate };
-  }
-
-  get events(): EventTableItem[] {
-    dbHandler.getDeviceEvents("fs-1217", { start: "", end: "" });
-
-    return this.eventItems.map((eventItem: EventTableItem) => ({
-      ...eventItem,
-      device: this.devices[eventItem.device].name,
-    }));
-  }
-
-  get isCustomTimespan(): boolean {
-    return Array.isArray(this.selectedTimespan);
-  }
-
-  get resultsSummaryText(): string {
-    return `${this.eventItems.length} total screenings, ${
-      this.eventItems.filter((item) => item.result === "Fever").length
-    } screened as Fever`;
-  }
-
-  get numNormalEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Normal").length;
-  }
-
-  get numErrorEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Error").length;
-  }
-
-  get numFeverEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Fever").length;
-  }
-
-  // noinspection JSMismatchedCollectionQueryUpdate
-  private headers: DataTableHeader[] = [
-    {
-      text: "Device",
-      value: "device",
-    },
-    {
-      text: "Screened Temp C",
-      value: "displayedTemperature",
-    },
-    {
-      text: "Fever Threshold C",
-      value: "threshold",
-    },
-    {
-      text: "Time",
-      value: "time",
-    },
-  ];
-
   getColorForItem(item: EventTableItem): string {
     if (item.displayedTemperature > MIN_ERROR_THRESHOLD) {
       return "#B8860B";
@@ -392,63 +470,10 @@ export default class App extends Vue {
     return "#11a84c";
   }
 
-  get temperatures() {
-    return [
-      {
-        name: "temperatures",
-        data: this.eventItems.map(
-          ({ displayedTemperature }) => displayedTemperature
-        ),
-      },
-    ];
-  }
-
-  get userEmail(): string {
-    return (auth.getCachedSession().getIdToken().decodePayload() as {
-      email: string;
-    }).email;
-  }
-
-  created(): void {
-    auth.userhandler = {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      onSuccess: (_session: CognitoAuthSession): void => {
-        this.loggedInStatus.currentUser = auth.getCurrentUser();
-        this.loggedInStatus.loggedIn = true;
-        if (window.location.href.includes("?code=")) {
-          window.location.href = HostName;
-        } else {
-          this.init();
-        }
-      },
-      onFailure: () => {
-        auth.signOut();
-      },
-    };
-    auth.useCodeGrantFlow();
-    // Or try and find an auth token in localStorage?
-    if (window.location.href.includes("?code=")) {
-      auth.parseCognitoWebResponse(window.location.href);
-    } else if (!auth.isUserSignedIn()) {
-      setTimeout(() => {
-        if (!auth.isUserSignedIn()) {
-          // This triggers a redirect to the login page.
-          auth.getSession();
-        }
-      }, 1000);
-    } else {
-      auth.getSession();
-    }
-  }
-
   async init(): Promise<void> {
     // Should be signed in already:
     this.loggedInStatus.currentUser = auth.getCurrentUser();
     this.loggedInStatus.loggedIn = true;
-
-    this.invitedUsers = await dbHandler.getInvitedUsers();
-    this.invitedUsers = this.invitedUsers;
-
     // Load config from localStorage:
     const configRaw = window.localStorage.getItem("config");
     if (configRaw !== null) {
@@ -458,9 +483,8 @@ export default class App extends Vue {
         if (Array.isArray(config.timespan)) {
           // Custom timespan:
           this.timespans[this.timespans.length - 1].value = config.timespan;
-          this.selectedTimespan = this.timespans[
-            this.timespans.length - 1
-          ].value;
+          this.selectedTimespan =
+            this.timespans[this.timespans.length - 1].value;
         } else {
           const timespan = this.timespans.find(
             (timespan) =>
@@ -475,20 +499,21 @@ export default class App extends Vue {
       } catch (e) {
         // Do nothing
       }
-      this.devices = await dbHandler.getDevices();
-      this.selectedDevices = this.selectedDevices.filter((device) =>
-        Object.keys(this.devices).includes(device)
-      );
-      if (this.selectedDevices.length) {
-        await this.fetchEventsForDevices(
-          this.selectedDevices,
-          this.dateRangeForSelectedTimespan
-        );
-      }
-    } else {
-      this.devices = await dbHandler.getDevices();
     }
+    this.devices = await dbHandler.getDevices();
+    console.log(this.devices);
+    this.invitedUsers = await dbHandler.getInvitedUsers();
+    this.invitedUsers = this.invitedUsers;
 
+    this.selectedDevices = this.selectedDevices.filter((device) =>
+      Object.keys(this.devices).includes(device)
+    );
+    if (this.selectedDevices.length) {
+      await this.fetchEventsForDevices(
+        this.selectedDevices,
+        this.dateRangeForSelectedTimespan
+      );
+    }
     // Periodically refresh.
     setInterval(async () => {
       const now = new Date().getTime();
@@ -507,61 +532,17 @@ export default class App extends Vue {
 
   async fetchEventsForDevices(
     devices: string[],
-    range: { startDate: string | null; endDate: string | null }
+    timeFrame: { startDate: string; endDate?: string }
   ): Promise<void> {
-    const allEvents: Promise<DynamoEventItem[]>[] = [];
     this.dataIsLoading = true;
-    for (const device of devices) {
-      allEvents.push(
-        new Promise((resolve) => {
-          let url = `/events?deviceId=${device}&type=Screen`;
-          if (range.startDate) {
-            url += `&startDate=${range.startDate}`;
-          }
-          if (range.endDate) {
-            url += `&endDate=${range.endDate}`;
-          }
-          this.requestHandler.makeGetRequest(url).then((response) => {
-            response.json().then((result) => resolve(result.Items));
-          });
-        })
-      );
-    }
-    const allEventData = await Promise.all(allEvents);
-    const mappedEventData = [];
-    for (const deviceEvents of allEventData) {
-      if (deviceEvents.length !== 0) {
-        mappedEventData.push(
-          ...deviceEvents.map(
-            (item: DynamoEventItem): EventTableItem => {
-              const displayedTemp = item.disp;
-              const threshold = item.fth;
-              const date = item.tsc.replace(/_/g, ":");
-              const lastHyphen = date.lastIndexOf(":");
-              const d = new Date(
-                Date.parse(
-                  `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-                )
-              );
-              return Object.freeze({
-                device: item.uid,
-                timestamp: d,
-                displayedTemperature: Number(displayedTemp.toFixed(2)),
-                threshold: threshold,
-                result:
-                  displayedTemp > MIN_ERROR_THRESHOLD
-                    ? "Error"
-                    : displayedTemp > threshold
-                    ? "Fever"
-                    : "Normal",
-                time: formatTime(d),
-              });
-            }
-          )
-        );
-      }
-    }
-    this.eventItems = mappedEventData
+    const { startDate, endDate } = timeFrame;
+    const allEvents = await Promise.all(
+      devices.map((device) =>
+        this.dbHandler.getDeviceEvents(device, { startDate, endDate })
+      )
+    );
+    const mappedEvents = allEvents.flat();
+    this.eventItems = mappedEvents
       .filter((item: EventTableItem) => item.displayedTemperature > 0)
       .sort((a: EventTableItem, b: EventTableItem) =>
         a.timestamp < b.timestamp ? 1 : -1
@@ -580,6 +561,7 @@ export default class App extends Vue {
       this.selectedDevicesChanged(deviceIds);
     }
   }
+
   selectedDevicesChanged(deviceIds: string[]): void {
     window.localStorage.setItem(
       "config",
@@ -594,8 +576,8 @@ export default class App extends Vue {
   selectedTimespanChanged(
     timespan:
       | {
-          start: Date | number;
-          end: Date | number | undefined;
+          startDate: Date | number;
+          endDate: Date | number | undefined;
         }
       | string[]
   ): void {

@@ -36,8 +36,8 @@
                   </v-col>
                   <v-col cols="6" sm="3" md="6">
                     <v-text-field
-                      v-model="newDeviceDefaultName"
-                      label="Default Name"
+                      v-model="newDeviceLabel"
+                      label="Label Name"
                     ></v-text-field>
                   </v-col>
                 </v-row>
@@ -89,7 +89,7 @@
       hide-default-footer
       :show-select="isAdmin"
       single-select
-      height="400"
+      max-height="400"
       fixed-header
       dense
     >
@@ -99,7 +99,10 @@
           v-on:save="deviceChangeName(item, item.name)"
           large
         >
-          {{ item.name }}
+          <v-row>
+            {{ item.name }}
+            <v-icon small class="mx-1"> mdi-pencil</v-icon>
+          </v-row>
           <template v-slot:input>
             <v-text-field
               v-model="item.name"
@@ -110,7 +113,6 @@
               counter
             ></v-text-field>
           </template>
-          <v-icon small class="mr-2"> mdi-pencil</v-icon>
         </v-edit-dialog>
       </template>
       <template v-slot:[`item.alerts`]="{ item }" align="center">
@@ -155,13 +157,6 @@
 import Vue, { PropType } from "vue";
 import { Device, User } from "@/model/db-handler";
 
-const headers = [
-  { text: "Id", value: "id", width: 195 },
-  { text: "Name", value: "name", width: 195 },
-  { text: "Notification", value: "alerts", align: "center" },
-  { text: "Invited Users", value: "invitedUsers", align: "center" },
-];
-
 export default Vue.extend({
   props: {
     isAdmin: Boolean,
@@ -171,10 +166,10 @@ export default Vue.extend({
       (device: string, newName: string) => string
     >,
     updateDeviceAlerts: Function as PropType<
-      (device: string, alerts: boolean) => string
+      (device: string, alerts: boolean) => Promise<void>
     >,
     toggleDeviceForUser: Function as PropType<
-      (device: Device, user: User) => string
+      (device: Device, user: User) => Promise<void>
     >,
   },
   data() {
@@ -183,9 +178,28 @@ export default Vue.extend({
       usersDialog: false,
       selectedUsers: [],
       newDeviceId: "",
-      newDeviceDefaultName: "",
-      headers,
+      newDeviceLabel: "",
     };
+  },
+  computed: {
+    headers() {
+      const headers = [
+        { text: "Label Id", value: "label", width: 165 },
+        { text: "Name", value: "name", width: 165 },
+        { text: "Notification", value: "alerts", align: "center", width: 105 },
+      ];
+
+      if (this.isAdmin) {
+        const [salt, invitedUsers] = this.isAdmin
+          ? [
+              { text: "Salt Id", value: "id", width: 105 },
+              { text: "Invited Users", value: "invitedUsers", align: "center" },
+            ]
+          : [];
+        return [salt, ...headers, invitedUsers];
+      }
+      return headers;
+    },
   },
   methods: {
     validate(input: string): boolean | string {
@@ -212,7 +226,8 @@ export default Vue.extend({
     save() {
       const device: Device = {
         id: this.newDeviceId,
-        name: this.newDeviceDefaultName,
+        label: this.newDeviceLabel,
+        name: this.newDeviceLabel,
         alerts: false,
         disable: false,
       };
@@ -220,19 +235,20 @@ export default Vue.extend({
       this.selectedUsers.forEach((user) => {
         const currUser = this.invitedUsers.find(({ email }) => user === email);
         if (currUser) {
+          console.log(currUser, device);
           this.toggleDeviceForUser(device, currUser);
         }
       });
 
       this.selectedUsers = [];
       this.newDeviceId = "";
-      this.newDeviceDefaultName = "";
+      this.newDeviceLabel = "";
       this.newItemDialog = false;
     },
     close() {
       this.selectedUsers = [];
       this.newDeviceId = "";
-      this.newDeviceDefaultName = "";
+      this.newDeviceLabel = "";
       this.newItemDialog = false;
     },
   },

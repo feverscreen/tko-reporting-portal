@@ -17,11 +17,13 @@ import {
 } from "@aws-sdk/client-dynamodb";
 import { Command, HttpHandlerOptions } from "@aws-sdk/types";
 import { SmithyResolvedConfiguration } from "@aws-sdk/smithy-client";
-import { REGION as region } from "@/constants";
 import { CognitoIdentityCredentialProvider } from "@aws-sdk/credential-provider-cognito-identity";
+import { formatTime } from "@/model/utils"
+import { REGION as region, MIN_ERROR_THRESHOLD } from "@/constants";
 
 export interface Device {
   name: string;
+  label: string;
   id: string;
   alerts: boolean;
   disable: boolean;
@@ -126,19 +128,47 @@ export default function DatabaseHandler(
       return toggle ? toggle : false;
     }
 
-  const putDevice = async (user = userId, device: Device) => {
+  const getDeviceInfo = async (
+    device: string
+    ): Promise<{recordUserActivity: boolean; labelName: string}> => {
       const params = {
+        TableName: "DeviceInfo",
+        Key: {"uid": {"S": device}},
+        AttributesToGet: ["recordUserActivity", "labelName"]
+      };
+
+      const result = await getItem(params);
+
+      const recordUserActivity = result?.Item?.recordUserActivity.BOOL ?? false;
+      const labelName = result?.Item?.labelName?.S ?? device;
+
+      return {recordUserActivity , labelName}
+    }
+
+  const putDevice = async (user = userId, device: Device) => {
+      const userDeviceParams = {
         TableName: "UserDevices",
         Item: {
           'Username' : {S: user},
           'DeviceId' : {S: device.id}
         }
       }
-      const result = await putItem(params);
+      const deviceParams = {
+        TableName: "DeviceInfo",
+        Item: {
+          'uid' : {S: device.id},
+          'recordUserActivity' : {BOOL: false},
+          'labelName' : {S: device.label}
+        }
+      }
+
+      await putItem(userDeviceParams);
+      await putItem(deviceParams);
     }
 
   return {
     async getDevices(user = userId): Promise<Record<string, Device>> {
+      console.log(user);
       const TableName = "UserDevices";
       const params = {
         TableName,
@@ -151,20 +181,22 @@ export default function DatabaseHandler(
         ProjectionExpression: "DeviceId, UserDeviceName, AlertsEnabled, Disabled",
       };
       const result = await query(params);
-      const devices = result?.Items ?? [];
-
-      return Object.assign(
-        {},
-        ...devices.map(({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => ({
+      const items = result?.Items ?? [];
+      const devices = await Promise.all(items
+        .filter(({Disabled}) => Disabled?.BOOL !== true || admin)
+        .map( async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
+          const deviceInfo = await getDeviceInfo(DeviceId.S ?? "");
+          return ({
           [DeviceId.S as string]: {
-            id: DeviceId.S as string,
+            id: DeviceId.S,
+            label: deviceInfo.labelName,
             name: ((UserDeviceName && UserDeviceName.S) ||
               DeviceId.S) as string,
             alerts: (AlertsEnabled && AlertsEnabled.S === "true") || false,
             disable: Disabled && Disabled.BOOL
           } as Device,
-        }))
-      );
+        })}))
+      return Object.assign({}, ...devices)
     },
     async updateDeviceName( device: string, newName: string) {
       const params = {
@@ -186,7 +218,6 @@ export default function DatabaseHandler(
       return result;
     },
     async updateDeviceAlerts(device: string, alert: boolean) {
-      console.log(device);
       const params = {
         TableName: "UserDevices",
         Key: {
@@ -201,9 +232,7 @@ export default function DatabaseHandler(
         },
         ReturnValues: "UPDATED_NEW",
       };
-      const result = await updateItem(params);
-
-      return result;
+      await updateItem(params);
     },
     async getInvitedUsers(user = admin ? "USERS" : userId): Promise<User[]> {
       const params = {
@@ -259,7 +288,6 @@ export default function DatabaseHandler(
       if (userDevice) {
         const disabled = await updateDeviceDisable(username, deviceId, !userDevice.disable)
         if (username === userId) {
-          console.log(disabled);
           device.disable = disabled
         }
         userDevice.disable = disabled;
@@ -269,20 +297,51 @@ export default function DatabaseHandler(
     },
     async getDeviceEvents(
       device: string,
-      timeFrame: { start: string; end?: string }
+      timeFrame: { startDate: string; endDate?: string }
     ): Promise<EventTableItem[]> {
+      const {startDate, endDate} = timeFrame;
       const params = {
         TableName: "Events",
         KeyConditionExpression: "uid = :id AND sort BETWEEN :start and :end",
         ExpressionAttributeValues: {
           ":id": { S: device },
-          ":start": { S: "Screen|2020-12-04T02_32_36_764Z" },
-          ":end": { S: "Screen|2020-12-08T23_08_49_072Z" },
+          ":start": { S: `Screen|${startDate}` },
+          ":end": { S: `Screen|${endDate}` },
         },
       };
       const result = await query(params);
 
-      return result ? [] : [];
+      const eventTableItems: EventTableItem[] | undefined = result?.Items?.map(item => {
+        const temp = Number(item.disp.N ?? 0);
+        const tsc = item.tsc.S ?? "";
+        const device = item.uid.S ?? "";
+        const threshold = Number(item.fth.N ?? 0);
+         
+        const displayedTemperature = Number(temp.toFixed(2));
+
+        const result = temp > MIN_ERROR_THRESHOLD ? "Error" : temp > threshold ? "Fever" : "Normal";
+
+        const date = tsc.replace(/_/g, ":");
+        const lastHyphen = date.lastIndexOf(":");
+        const timestamp = new Date(
+          Date.parse(
+            `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
+          )
+        );
+        const time = formatTime(timestamp);
+
+        const eventTableItem: EventTableItem = {
+          device,
+          displayedTemperature,
+          threshold,
+          result,
+          timestamp,
+          time
+        }
+        return eventTableItem
+      });
+
+      return eventTableItems ? eventTableItems : [];
     },
-  };
 }
+  };
