@@ -24,8 +24,11 @@
           :devices="Object.values(devices)"
           :isAdmin="isAdmin"
           :invitedUsers="invitedUsers"
-          :updateDeviceName="dbHandler.updateDeviceName"
+          :delete-device="deleteDevice"
+          :update-device-name="dbHandler.updateDeviceName"
+          :update-device-label="dbHandler.updateDeviceLabel"
           :update-device-alerts="dbHandler.updateDeviceAlerts"
+          :update-device-record="dbHandler.updateDeviceRecord"
           :toggle-device-for-user="dbHandler.toggleDeviceForUser"
         />
       </v-dialog>
@@ -128,7 +131,12 @@
             </span>
             <span>normal</span>
           </div>
-          <div v-if="numFeverEvents !== 0" class="event-summary fever">
+          <div
+            v-if="numFeverEvents !== 0"
+            class="event-summary fever"
+            v-bind:class="{ 'event-selected': showFilteredEvents }"
+            v-on:click="filterFeverEvents"
+          >
             <span>{{ numFeverEvents }}</span>
             <span>fever</span>
           </div>
@@ -147,7 +155,7 @@
             fixed-header
             :loading="dataIsLoading"
             :headers="headers"
-            :items="events"
+            :items="showFilteredEvents ? filterEvents : events"
             :items-per-page="10"
             sort-by="time"
             sort-desc
@@ -437,6 +445,12 @@ export default class App extends Vue {
     return items;
   }
 
+  deleteDevice(device: string) {
+    this.dbHandler.deleteDevice(device);
+    Vue.delete(this.devices, device);
+    this.selectedDevicesChanged;
+  }
+
   exportCsv() {
     let start = this.dateRangeForSelectedTimespan.startDate as string;
     start = start.substr(0, start.lastIndexOf("_"));
@@ -602,6 +616,15 @@ export default class App extends Vue {
     }
   }
 
+  private showFilteredEvents = false;
+  private filterEvents: EventTableItem[] = [];
+  filterFeverEvents(): void {
+    this.showFilteredEvents = !this.showFilteredEvents;
+    this.filterEvents = this.showFilteredEvents
+      ? this.events.filter((item) => item.result === "Fever")
+      : this.events;
+  }
+
   signOut(): void {
     auth.signOut();
   }
@@ -654,7 +677,12 @@ export default class App extends Vue {
     background: #b8860b;
   }
   &.fever {
+    cursor: pointer;
     background: #a81c11;
+    &.event-selected {
+      box-shadow: 0px 0px 0px 7px rgba(227, 136, 136, 0.75);
+    }
+    transition: all 0.2s ease-in-out;
   }
 }
 </style>

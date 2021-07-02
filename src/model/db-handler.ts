@@ -26,6 +26,7 @@ export interface Device {
   label: string;
   id: string;
   alerts: boolean;
+  record: boolean;
   disable: boolean;
 }
 
@@ -107,6 +108,7 @@ export default function DatabaseHandler(
   const updateItem = (params: UpdateItemCommandInput) => {
     return dbsend(new UpdateItemCommand(params));
   };
+
   const updateDeviceDisable = async (user: string, device: string, disable: boolean): Promise<boolean> => {
       const params = {
         TableName: "UserDevices",
@@ -164,11 +166,9 @@ export default function DatabaseHandler(
 
       await putItem(userDeviceParams);
       await putItem(deviceParams);
-    }
+    };
 
-  return {
-    async getDevices(user = userId): Promise<Record<string, Device>> {
-      console.log(user);
+    const getDevices = async (user = userId): Promise<Record<string, Device>>  => {
       const TableName = "UserDevices";
       const params = {
         TableName,
@@ -185,20 +185,42 @@ export default function DatabaseHandler(
       const devices = await Promise.all(items
         .filter(({Disabled}) => Disabled?.BOOL !== true || admin)
         .map( async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
-          const deviceInfo = await getDeviceInfo(DeviceId.S ?? "");
+          const {labelName, recordUserActivity} = await getDeviceInfo(DeviceId.S ?? "");
           return ({
           [DeviceId.S as string]: {
             id: DeviceId.S,
-            label: deviceInfo.labelName,
+            label: labelName,
             name: ((UserDeviceName && UserDeviceName.S) ||
               DeviceId.S) as string,
+            record: recordUserActivity,
             alerts: (AlertsEnabled && AlertsEnabled.S === "true") || false,
             disable: Disabled && Disabled.BOOL
           } as Device,
         })}))
       return Object.assign({}, ...devices)
-    },
-    async updateDeviceName( device: string, newName: string) {
+    };
+
+    const updateDeviceLabel = async ( device: string, newLabel: string) => {
+      const params = {
+        TableName: "DeviceInfo",
+        Key: {
+          ["uid"]: { S: device },
+        },
+        UpdateExpression: "set labelName = :l",
+        ExpressionAttributeValues: {
+          ":l": {
+            S: newLabel.length > 0 ? newLabel : device,
+          },
+        },
+        ReturnValues: "UPDATED_NEW",
+      };
+      const result = await updateItem(params);
+      console.log(result);
+
+      return result;
+    };
+
+    const updateDeviceName = async ( device: string, newName: string) => {
       const params = {
         TableName: "UserDevices",
         Key: {
@@ -216,8 +238,26 @@ export default function DatabaseHandler(
       const result = await updateItem(params);
 
       return result;
-    },
-    async updateDeviceAlerts(device: string, alert: boolean) {
+    };
+
+    const updateDeviceRecord = async (device: string, record: boolean) => {
+      const params = {
+        TableName: "DeviceInfo",
+        Key: {
+          ["uid"]: { S: device },
+        },
+        UpdateExpression: "set recordUserActivity = :r",
+        ExpressionAttributeValues: {
+          ":r": {
+            BOOL: record,
+          },
+        },
+        ReturnValues: "UPDATED_NEW",
+      };
+      await updateItem(params);
+    };
+
+    const updateDeviceAlerts = async (device: string, alert: boolean) => {
       const params = {
         TableName: "UserDevices",
         Key: {
@@ -233,29 +273,9 @@ export default function DatabaseHandler(
         ReturnValues: "UPDATED_NEW",
       };
       await updateItem(params);
-    },
-    async getInvitedUsers(user = admin ? "USERS" : userId): Promise<User[]> {
-      const params = {
-        TableName: "Users",
-        Key: {"Username": {"S": user}},
-        AttributesToGet: ["Username", "Email", "Confirmed", "Users"]
-      };
-      const result = await getItem(params);
-      const userIds = result?.Item?.Users?.SS
-      if (userIds) {
-        const info = await this.getUserInfo(userIds)
-        const users = info.sort((a, b) => {
-          const n1 = a.email.toLowerCase();
-          const n2 = b.email.toLowerCase();
-          return n1 < n2 ? -1 : n1 > n2 ? 1 : 0;
-        })
+    };
 
-        return users 
-      }
-
-      return [];
-    },
-    async getUserInfo(ids: string[]): Promise<User[]> {
+    const getUserInfo = async (ids: string[]): Promise<User[]> => {
       const params = {
         RequestItems:{ "Users": {
           Keys: ids.map(id => ({"Username": {"S": id}, })),
@@ -266,7 +286,7 @@ export default function DatabaseHandler(
       const info = result?.Responses?.Users as DBUserInfo[] | undefined;
       if (info) {
         return Promise.all(info.map(async ({Username, Confirmed, Email, Group, Users}) => {
-          const devices = await this.getDevices(Username.S);
+          const devices = await getDevices(Username.S);
           return {
             username: Username.S,
             confirmed: Confirmed.BOOL,
@@ -279,9 +299,54 @@ export default function DatabaseHandler(
       }
 
       return [];
-    },
-    async toggleDeviceForUser(device: Device, user: User) {
-      console.log(device, user);
+    };
+
+    const getInvitedUsers = async (user = admin ? "USERS" : userId): Promise<User[]> => {
+      const params = {
+        TableName: "Users",
+        Key: {"Username": {"S": user}},
+        AttributesToGet: ["Username", "Email", "Confirmed", "Users"]
+      };
+      const result = await getItem(params);
+      const userIds = result?.Item?.Users?.SS
+      if (userIds) {
+        const info = await getUserInfo(userIds)
+        const users = info.sort((a, b) => {
+          const n1 = a.email.toLowerCase();
+          const n2 = b.email.toLowerCase();
+          return n1 < n2 ? -1 : n1 > n2 ? 1 : 0;
+        })
+
+        return users 
+      }
+
+      return [];
+    };
+
+    const deleteDevice = async (deviceId: string) => {
+      const users = await getInvitedUsers();
+      users.filter(user => user.devices[deviceId])
+      .forEach(async (user) => { 
+        const params = {
+          TableName: "UserDevices",
+          Key: {
+            Username: {S: user.username},
+            DeviceId: {S: deviceId}
+          }
+        }
+        await deleteItem(params);
+      });
+
+      const deleteInfoParams = {
+        TableName: "DeviceInfo",
+        Key: {
+          "uid": {S: deviceId}
+        }
+      };
+      deleteItem(deleteInfoParams);
+    };
+
+    const toggleDeviceForUser = async (device: Device, user: User) => {
       const {id: deviceId} = device;
       const {username} = user;
       const userDevice = Object.values(user.devices).find(({id}) => id === deviceId);
@@ -294,11 +359,12 @@ export default function DatabaseHandler(
       } else {
         await putDevice(username, device);
       }
-    },
-    async getDeviceEvents(
+    };
+
+    const getDeviceEvents = async (
       device: string,
       timeFrame: { startDate: string; endDate?: string }
-    ): Promise<EventTableItem[]> {
+    ): Promise<EventTableItem[]>  => {
       const {startDate, endDate} = timeFrame;
       const params = {
         TableName: "Events",
@@ -342,6 +408,18 @@ export default function DatabaseHandler(
       });
 
       return eventTableItems ? eventTableItems : [];
-    },
-}
+    };
+
+  return {
+    getDeviceEvents,
+    getDevices,
+    getUserInfo,
+    getInvitedUsers,
+    toggleDeviceForUser,
+    deleteDevice,
+    updateDeviceName,
+    updateDeviceLabel,
+    updateDeviceRecord,
+    updateDeviceAlerts,
   };
+}
