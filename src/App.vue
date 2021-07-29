@@ -11,10 +11,18 @@
       <v-row align="center">
         <v-toolbar flat>
           <v-spacer />
+          <v-btn text @click="showUsersOverview = true"> Edit Users </v-btn>
           <v-btn text @click="showDevicesOverview = true"> Edit Devices </v-btn>
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
+      <v-dialog
+        ref="dialog"
+        v-model="showUsersOverview"
+      >
+        <usersOverview
+        />
+      </v-dialog>
       <v-dialog
         ref="dialog"
         v-model="showDevicesOverview"
@@ -179,6 +187,7 @@ import { Component, Vue } from "vue-property-decorator";
 import VueApexCharts from "vue-apexcharts";
 import ScreeningChart from "@/components/ScreeningChart.component.vue";
 import devicesOverview from "@/components/DevicesOverview.component.vue";
+import usersOverview from "@/components/UsersOverview.component.vue";
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 import { DataTableHeader } from "vuetify";
 import { formatDate } from "@/model/utils";
@@ -223,7 +232,7 @@ interface SavedSettings {
 // Set the auth token for axios to use when the component is created.
 
 @Component({
-  components: { apexchart: ScreeningChart, devicesOverview },
+  components: { apexchart: ScreeningChart, usersOverview, devicesOverview },
 })
 export default class App extends Vue {
   private loggedInStatus: {
@@ -236,6 +245,7 @@ export default class App extends Vue {
   private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
   private showDateRangePicker = false;
+  private showUsersOverview = false;
   private showDevicesOverview = false;
   private requestHandler = RequestHandler(auth);
   private dbHandler = dbHandler;

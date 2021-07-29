@@ -191,7 +191,7 @@ export default function DatabaseHandler(
             id: DeviceId.S,
             label: labelName,
             name: ((UserDeviceName && UserDeviceName.S) ||
-              DeviceId.S) as string,
+              labelName) as string,
             record: recordUserActivity,
             alerts: (AlertsEnabled && AlertsEnabled.S === "true") || false,
             disable: Disabled && Disabled.BOOL
@@ -215,7 +215,6 @@ export default function DatabaseHandler(
         ReturnValues: "UPDATED_NEW",
       };
       const result = await updateItem(params);
-      console.log(result);
 
       return result;
     };
