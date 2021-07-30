@@ -3,52 +3,123 @@
     <v-card-title class="d-flex align-center justify-space-between">
       Users Overview
       <div>
-        <v-dialog
-          v-model="newUserDialog"
-          max-width="600px"
-          persistent
-        >
-          <template v-slot:activator="{ on, attrs }">
-            <v-btn
-              color="primary"
-              dark
-              class="my-2 mr-4"
-              v-bind="attrs"
-              v-on="on"
-            >
-              New User 
-              <v-icon class="ml-1 mb-1"> mdi-plus </v-icon>
-            </v-btn>
-          </template>
-          <v-card>
-            <v-container>
-            <span class="text-h5">Create New User</span>
-            <v-row>
-            </v-row>
-            <v-card-actions>
-              <v-spacer></v-spacer>
-              <v-btn color="blue darken-1" text v-on:click="close">
-                Cancel
-              </v-btn>
-              <v-btn color="blue darken-1" text v-on:click="save"> Save </v-btn>
-            </v-card-actions>
-            </v-container>
-          </v-card>
-      </v-dialog>
+        <v-btn color="primary" dark class="my-2 mr-4" @click="addNewUser">
+          New User
+          <v-icon class="ml-1 mb-1"> mdi-plus </v-icon>
+        </v-btn>
       </div>
     </v-card-title>
+    <v-data-table
+      :items="qrUsers"
+      :headers="headers"
+      :items-per-page="20"
+      dense
+      show-select
+    >
+      <template v-slot:[`item.id`]="{ item }">
+        <v-edit-dialog
+          :ref="item.id ? item.id : 'tempEdit'"
+          @close="saveUserId(item)"
+          :return-value="item.id"
+        >
+          <v-row>
+            {{ item.id }}
+            <v-icon small class="mx-1"> mdi-pencil</v-icon>
+          </v-row>
+          <template v-slot:input>
+            <v-text-field
+              v-model="tempId"
+              :label="item.id"
+              :rules="[validate]"
+              single-line
+              clearable
+              counter
+            ></v-text-field>
+          </template>
+        </v-edit-dialog>
+      </template>
+      <template v-slot:[`item.qr`]="{ item }">
+        <v-dialog max-width="130" hide-overlay>
+          <template v-slot:activator="{ on, attrs }">
+            <v-btn text v-bind="attrs" v-on="on"
+              ><v-icon>mdi-qrcode</v-icon></v-btn
+            >
+          </template>
+          <QRImage :id="item.id" />
+        </v-dialog>
+      </template>
+    </v-data-table>
   </v-card>
 </template>
 
 <script lang="ts">
 import Vue, { PropType } from "vue";
 import { Device, User } from "@/model/db-handler";
+import QRImage from "@/components/QRImage.component.vue";
 
 export default Vue.extend({
-  data() {
+  props: {
+    users: Array as PropType<string[]>,
+    updateQRUsers: Function as PropType<(userIds: string[]) => void>,
+  },
+  components: {
+    QRImage,
+  },
+  data: function () {
     return {
-    newUserDialog: false 
+      newUserDialog: false,
+      tempUsers: [] as { id: string }[],
+      headers: [
+        { text: "User ID", value: "id" },
+        { text: "QR Code", value: "qr" },
+      ],
+      tempId: "",
     };
+  },
+  computed: {
+    qrUsers: {
+      get: function (): { id: string }[] {
+        return [...this.users.map((id) => ({ id })), ...this.tempUsers];
+      },
+    },
+  },
+  methods: {
+    async addNewUser() {
+      await this.tempUsers.push({ id: "" });
+      (this.$refs.tempEdit as any).isActive = true;
+    },
+    validate(input: string): boolean | string {
+      console.log(input);
+      if (input) {
+        const duplicate =
+          this.qrUsers.filter(({ id }) => id === input).length !== 0;
+        const long = input.length > 50;
+        return !long && !duplicate
+          ? true
+          : long
+          ? "Max Characters 50"
+          : "Duplicate ID found";
+      }
+      return true;
+    },
+    saveUserId(user: { id: string }) {
+      if (this.qrUsers.filter(({ id }) => id === this.tempId).length > 0) {
+        this.tempUsers = [];
+        return;
+      }
+      if (this.tempId) {
+        user.id = this.tempId;
+      } else {
+        this.tempUsers = [];
+        if (user.id === "") {
+          return;
+        }
+      }
+      this.tempId = "";
+      this.updateQRUsers(
+        this.qrUsers.map(({ id }) => id).filter((id) => id !== "")
+      );
+    },
   },
 });
 </script>

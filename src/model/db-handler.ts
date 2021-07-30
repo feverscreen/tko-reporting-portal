@@ -260,8 +260,8 @@ export default function DatabaseHandler(
       const params = {
         TableName: "UserDevices",
         Key: {
-          ["Username"]: { S: userId },
-          ["DeviceId"]: { S: device },
+          "Username": { S: userId },
+          "DeviceId": { S: device },
         },
         UpdateExpression: "set AlertsEnabled = :ae",
         ExpressionAttributeValues: {
@@ -273,6 +273,19 @@ export default function DatabaseHandler(
       };
       await updateItem(params);
     };
+
+    const updateQRUsers = async (userIds: string[]) => {
+      const params = {
+        TableName: "Users",
+        Key: {
+          "Username": {S: userId}
+      },
+      UpdateExpression: "set #us = :us",
+      ExpressionAttributeValues: {":us": { "SS": userIds.map(id => id)}},
+      ExpressionAttributeNames: {"#us": "Users"}
+    }
+      return updateItem(params);
+    }
 
     const getUserInfo = async (ids: string[]): Promise<User[]> => {
       const params = {
@@ -300,7 +313,18 @@ export default function DatabaseHandler(
       return [];
     };
 
-    const getInvitedUsers = async (user = admin ? "USERS" : userId): Promise<User[]> => {
+    const getQRUsers = async (): Promise<string[]> => {
+      const params = {
+        TableName: "Users",
+        Key: {"Username": {"S": userId}},
+        AttributesToGet: ["Users"]
+      }
+      const result = await getItem(params);
+      const userIds = result?.Item?.Users?.SS;
+      return userIds ?? [];
+    }
+
+    const getInvitedUsers = async (user = "USERS"): Promise<User[]> => {
       const params = {
         TableName: "Users",
         Key: {"Username": {"S": user}},
@@ -414,11 +438,13 @@ export default function DatabaseHandler(
     getDevices,
     getUserInfo,
     getInvitedUsers,
+    getQRUsers,
     toggleDeviceForUser,
     deleteDevice,
     updateDeviceName,
     updateDeviceLabel,
     updateDeviceRecord,
     updateDeviceAlerts,
+    updateQRUsers
   };
 }
