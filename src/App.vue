@@ -16,11 +16,10 @@
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
-      <v-dialog
-        ref="dialog"
-        v-model="showUsersOverview"
-      >
+      <v-dialog ref="dialog" v-model="showUsersOverview" :max-width="400">
         <usersOverview
+          :users="qrUsers"
+          :updateQRUsers="dbHandler.updateQRUsers"
         />
       </v-dialog>
       <v-dialog
@@ -241,6 +240,7 @@ export default class App extends Vue {
   } = { loggedIn: false, currentUser: null };
   private devices: Record<string, Device> = {};
   private invitedUsers: User[] = [];
+  private qrUsers: string[] = [];
   private selectedDevices: string[] = [];
   private eventItems: EventTableItem[] = [];
   private dataIsLoading = false;
@@ -526,9 +526,8 @@ export default class App extends Vue {
       }
     }
     this.devices = await dbHandler.getDevices();
-    console.log(this.devices);
     this.invitedUsers = await dbHandler.getInvitedUsers();
-    this.invitedUsers = this.invitedUsers;
+    this.qrUsers = await dbHandler.getQRUsers();
 
     this.selectedDevices = this.selectedDevices.filter((device) =>
       Object.keys(this.devices).includes(device)
