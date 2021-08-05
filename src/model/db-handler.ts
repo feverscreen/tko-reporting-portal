@@ -1,20 +1,4 @@
-import {
-  DynamoDBClient,
-  UpdateItemCommand,
-  UpdateItemCommandInput,
-  GetItemCommand,
-  GetItemCommandInput,
-  BatchGetItemCommand,
-  BatchGetItemCommandInput,
-  PutItemCommand,
-  PutItemCommandInput,
-  DeleteItemCommand,
-  DeleteItemCommandInput,
-  QueryCommand,
-  QueryCommandInput,
-  ServiceInputTypes,
-  ServiceOutputTypes,
-} from "@aws-sdk/client-dynamodb";
+import clientDynamodb, {DynamoDBClient, GetItemCommand, BatchGetItemCommand, QueryCommand, PutItemCommand, DeleteItemCommand, UpdateItemCommand} from "@aws-sdk/client-dynamodb";
 import { Command, HttpHandlerOptions } from "@aws-sdk/types";
 import { SmithyResolvedConfiguration } from "@aws-sdk/smithy-client";
 import { CognitoIdentityCredentialProvider } from "@aws-sdk/credential-provider-cognito-identity";
@@ -72,13 +56,13 @@ export default function DatabaseHandler(
 ) {
   const ddbClient = new DynamoDBClient({ region, credentials: auth });
   const dbsend = async <
-    ClientInput extends ServiceInputTypes,
-    ClientOutput extends ServiceOutputTypes
+    ClientInput extends clientDynamodb.ServiceInputTypes,
+    ClientOutput extends clientDynamodb.ServiceOutputTypes
   >(
     command: Command<
-      ServiceInputTypes,
+      clientDynamodb.ServiceInputTypes,
       ClientInput,
-      ServiceOutputTypes,
+      clientDynamodb.ServiceOutputTypes,
       ClientOutput,
       SmithyResolvedConfiguration<HttpHandlerOptions>
     >
@@ -90,22 +74,22 @@ export default function DatabaseHandler(
       console.error(e);
     }
   };
-  const getItem = (params: GetItemCommandInput) => {
+  const getItem = (params: clientDynamodb.GetItemCommandInput) => {
     return dbsend(new GetItemCommand(params));
   };
-  const batchGetItem = (params: BatchGetItemCommandInput) => {
+  const batchGetItem = (params: clientDynamodb.BatchGetItemCommandInput) => {
     return dbsend(new BatchGetItemCommand(params));
   };
-  const query = (params: QueryCommandInput) => {
+  const query = (params: clientDynamodb.QueryCommandInput) => {
     return dbsend(new QueryCommand(params));
   };
-  const putItem = (params: PutItemCommandInput) => {
+  const putItem = (params: clientDynamodb.PutItemCommandInput) => {
     return dbsend(new PutItemCommand(params));
   };
-  const deleteItem = (params: DeleteItemCommandInput) => {
+  const deleteItem = (params: clientDynamodb.DeleteItemCommandInput) => {
     return dbsend(new DeleteItemCommand(params));
   };
-  const updateItem = (params: UpdateItemCommandInput) => {
+  const updateItem = (params: clientDynamodb.UpdateItemCommandInput) => {
     return dbsend(new UpdateItemCommand(params));
   };
 
@@ -404,6 +388,7 @@ export default function DatabaseHandler(
         const temp = Number(item.disp.N ?? 0);
         const tsc = item.tsc.S ?? "";
         const device = item.uid.S ?? "";
+        const qrid = item.qrid?.S ?? "";
         const threshold = Number(item.fth.N ?? 0);
          
         const displayedTemperature = Number(temp.toFixed(2));
@@ -425,7 +410,8 @@ export default function DatabaseHandler(
           threshold,
           result,
           timestamp,
-          time
+          time,
+          qrid
         }
         return eventTableItem
       });

@@ -281,6 +281,7 @@ export default class App extends Vue {
       value: "device",
       width: 240,
     },
+    ...(this.events.findIndex(val => val.qrid) !== undefined && {text: "ID", value: "qrid", width: 120}),
     {
       text: "Screened Temp C",
       value: "displayedTemperature",
