@@ -47,8 +47,12 @@
           </template>
           <QRImage :id="item.id" />
         </v-dialog>
+        <v-btn text @click="printQR(item.id)">
+          <v-icon>mdi-printer</v-icon></v-btn
+        >
       </template>
     </v-data-table>
+    <canvas ref="qrImage" hidden></canvas>
   </v-card>
 </template>
 
@@ -56,6 +60,8 @@
 import Vue, { PropType } from "vue";
 import { Device, User } from "@/model/db-handler";
 import QRImage from "@/components/QRImage.component.vue";
+import QRCode from "qrcode";
+import printJS from "print-js";
 
 export default Vue.extend({
   props: {
@@ -119,6 +125,13 @@ export default Vue.extend({
       this.updateQRUsers(
         this.qrUsers.map(({ id }) => id).filter((id) => id !== "")
       );
+    },
+    async printQR(id: string) {
+      const qrimg = await QRCode.toDataURL(
+        this.$refs.qrImage as HTMLCanvasElement,
+        id
+      );
+      printJS({ printable: qrimg, type: "image", imageStyle: "width:400px" });
     },
   },
 });

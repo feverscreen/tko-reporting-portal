@@ -11,8 +11,8 @@
       <v-row align="center">
         <v-toolbar flat>
           <v-spacer />
-          <v-btn text @click="showUsersOverview = true"> Edit Users </v-btn>
-          <v-btn text @click="showDevicesOverview = true"> Edit Devices </v-btn>
+          <v-btn text @click="showUsersOverview = true"> Users </v-btn>
+          <v-btn text @click="showDevicesOverview = true"> Devices </v-btn>
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
