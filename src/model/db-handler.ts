@@ -11,15 +11,17 @@ export interface Device {
   id: string;
   alerts: boolean;
   record: boolean;
+  qr: boolean;
   disable: boolean;
 }
 
-export interface User {
+export interface Admin {
   username: string;
   email: string;
   confirmed: boolean;
   devices: Record<string, Device>;
   group?: string;
+  organization?: string;
   users?: string;
 }
 
@@ -28,6 +30,7 @@ export interface DBUserInfo {
   Email: {S: string};
   Group?: {S: string};
   Username: {S: string};
+  Organization: {S: string};
   Users?: {SS: string[]};
 }
 
@@ -39,7 +42,8 @@ export interface EventTableItem {
   timestamp: Date;
   device: string;
   time: string;
-  [key: string]: string | number | Date;
+  qrid: string;
+  //[key: string]: string | number | Date;
 }
 
 export interface DynamoEventItem {
@@ -116,7 +120,7 @@ export default function DatabaseHandler(
 
   const getDeviceInfo = async (
     device: string
-    ): Promise<{recordUserActivity: boolean; labelName: string}> => {
+    ): Promise<{recordUserActivity: boolean; qrMode: boolean; labelName: string}> => {
       const params = {
         TableName: "DeviceInfo",
         Key: {"uid": {"S": device}},
@@ -125,10 +129,11 @@ export default function DatabaseHandler(
 
       const result = await getItem(params);
 
-      const recordUserActivity = result?.Item?.recordUserActivity.BOOL ?? false;
+      const recordUserActivity = result?.Item?.recordUserActivity?.BOOL ?? false;
+      const qrMode = result?.Item?.qrMode?.BOOL ?? true;
       const labelName = result?.Item?.labelName?.S ?? device;
 
-      return {recordUserActivity , labelName}
+      return {recordUserActivity , qrMode, labelName}
     }
 
   const putDevice = async (user = userId, device: Device) => {
@@ -169,7 +174,7 @@ export default function DatabaseHandler(
       const devices = await Promise.all(items
         .filter(({Disabled}) => Disabled?.BOOL !== true || admin)
         .map( async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
-          const {labelName, recordUserActivity} = await getDeviceInfo(DeviceId.S ?? "");
+          const {labelName, qrMode, recordUserActivity} = await getDeviceInfo(DeviceId.S ?? "");
           return ({
           [DeviceId.S as string]: {
             id: DeviceId.S,
@@ -177,6 +182,7 @@ export default function DatabaseHandler(
             name: ((UserDeviceName && UserDeviceName.S) ||
               labelName) as string,
             record: recordUserActivity,
+            qr: qrMode,
             alerts: (AlertsEnabled && AlertsEnabled.S === "true") || false,
             disable: Disabled && Disabled.BOOL
           } as Device,
@@ -240,6 +246,25 @@ export default function DatabaseHandler(
       await updateItem(params);
     };
 
+    const updateDeviceQR = async (device: string, qrMode: boolean) => {
+      const params = {
+        TableName: "UserDevices",
+        Key: {
+          "Username": { S: userId },
+          "DeviceId": { S: device },
+        },
+        UpdateExpression: "set qrMode = :qr",
+        ExpressionAttributeValues: {
+          ":qr": {
+            S: qrMode ? "true" : "false",
+          },
+        },
+        ReturnValues: "UPDATED_NEW",
+      };
+      await updateItem(params);
+    };
+
+
     const updateDeviceAlerts = async (device: string, alert: boolean) => {
       const params = {
         TableName: "UserDevices",
@@ -258,39 +283,56 @@ export default function DatabaseHandler(
       await updateItem(params);
     };
 
-    const updateQRUsers = async (userIds: string[]) => {
+    const updateQRUser = async (org: string, userId: string) => {
       const params = {
-        TableName: "Users",
+        TableName: "TeKahuOra",
         Key: {
-          "Username": {S: userId}
+          "PK": {S: org},
+          "SK": {S: `USER|${userId}`}
       },
-      UpdateExpression: "set #us = :us",
-      ExpressionAttributeValues: {":us": { "SS": userIds.map(id => id)}},
-      ExpressionAttributeNames: {"#us": "Users"}
+      UpdateExpression: "set #id = :id",
+      ExpressionAttributeValues: {":id": { "S": userId}},
+      ExpressionAttributeNames: {"#id": "id"}
     }
       return updateItem(params);
     }
 
-    const getUserInfo = async (ids: string[]): Promise<User[]> => {
+    const updateAdminOrg = async (adminId: string, organization: string) => {
+      const params = {
+        TableName: "Users",
+        Key: {
+          "Username": {S: adminId}
+      },
+      UpdateExpression: "set #org = :org",
+      ExpressionAttributeValues: {":org": { "S": organization}},
+      ExpressionAttributeNames: {"#org": "Organization"}
+    }
+      return updateItem(params);
+    }
+
+
+    const getUserInfo = async (ids: string[]): Promise<Admin[]> => {
       const params = {
         RequestItems:{ "Users": {
           Keys: ids.map(id => ({"Username": {"S": id}, })),
-          AttributesToGet: ["Username", "Email", "Confirmed"]
+          AttributesToGet: ["Username", "Email", "Confirmed", "Organization"]
         }
       }};
       const result = await batchGetItem(params);
       const info = result?.Responses?.Users as DBUserInfo[] | undefined;
       if (info) {
-        return Promise.all(info.map(async ({Username, Confirmed, Email, Group, Users}) => {
+        return Promise.all(info.map(async ({Username, Confirmed, Email, Group, Users, ...rest}) => {
           const devices = await getDevices(Username.S);
+          const organization = rest.Organization?.S ?? ""
           return {
             username: Username.S,
             confirmed: Confirmed.BOOL,
             email: Email.S,
             group: Group?.S,
             users: Users?.SS,
+            organization,
             devices
-          } as User
+          } as Admin
         }))
       }
 
@@ -308,7 +350,7 @@ export default function DatabaseHandler(
       return userIds ?? [];
     }
 
-    const getInvitedUsers = async (user = "USERS"): Promise<User[]> => {
+    const getAdminUsers = async (user = "USERS"): Promise<Admin[]> => {
       const params = {
         TableName: "Users",
         Key: {"Username": {"S": user}},
@@ -331,7 +373,7 @@ export default function DatabaseHandler(
     };
 
     const deleteDevice = async (deviceId: string) => {
-      const users = await getInvitedUsers();
+      const users = await getAdminUsers();
       users.filter(user => user.devices[deviceId])
       .forEach(async (user) => { 
         const params = {
@@ -353,7 +395,7 @@ export default function DatabaseHandler(
       deleteItem(deleteInfoParams);
     };
 
-    const toggleDeviceForUser = async (device: Device, user: User) => {
+    const toggleDeviceForAdmin = async (device: Device, user: Admin) => {
       const {id: deviceId} = device;
       const {username} = user;
       const userDevice = Object.values(user.devices).find(({id}) => id === deviceId);
@@ -423,14 +465,16 @@ export default function DatabaseHandler(
     getDeviceEvents,
     getDevices,
     getUserInfo,
-    getInvitedUsers,
+    getAdminUsers,
     getQRUsers,
-    toggleDeviceForUser,
+    toggleDeviceForAdmin,
     deleteDevice,
     updateDeviceName,
     updateDeviceLabel,
     updateDeviceRecord,
+    updateDeviceQR,
     updateDeviceAlerts,
-    updateQRUsers
+    updateQRUser,
+    updateAdminOrg
   };
 }

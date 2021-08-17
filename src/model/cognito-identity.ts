@@ -27,10 +27,10 @@ export default function CognitoIdentity(auth: CognitoAuth) {
     get credentials() {
       return credentials as CognitoIdentityCredentialProvider;
     },
-    get isAdmin() {
+    get isSuperAdmin() {
       const groups = (idToken.decodePayload() as {["cognito:groups"]: string[]})["cognito:groups"] as string[]
-      const isAdmin = groups ? groups.includes("Admin") : false;
-      return isAdmin
+      const isSuperAdmin = groups ? groups.includes("Admin") : false;
+      return isSuperAdmin
     }
   };
 }

@@ -16,27 +16,35 @@
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
-      <v-dialog ref="dialog" v-model="showUsersOverview" :max-width="400">
+      <v-dialog
+        :isSuperAdmin="isSuperAdmin"
+        ref="dialog"
+        v-model="showUsersOverview"
+        :max-width="isSuperAdmin ? 600 : 450"
+      >
         <usersOverview
+          :adminUsers="adminUsers"
           :users="qrUsers"
-          :updateQRUsers="dbHandler.updateQRUsers"
+          :updateQRUser="dbHandler.updateQRUser"
+          :updateAdminOrg="dbHandler.updateAdminOrg"
         />
       </v-dialog>
       <v-dialog
         ref="dialog"
         v-model="showDevicesOverview"
-        :max-width="isAdmin ? 800 : 450"
+        :max-width="isSuperAdmin ? 800 : 450"
       >
         <devicesOverview
           :devices="Object.values(devices)"
-          :isAdmin="isAdmin"
-          :invitedUsers="invitedUsers"
+          :isSuperAdmin="isSuperAdmin"
+          :adminUsers="adminUsers"
           :delete-device="deleteDevice"
           :update-device-name="dbHandler.updateDeviceName"
           :update-device-label="dbHandler.updateDeviceLabel"
           :update-device-alerts="dbHandler.updateDeviceAlerts"
+          :updateDeviceQR="dbHandler.updateDeviceQR"
           :update-device-record="dbHandler.updateDeviceRecord"
-          :toggle-device-for-user="dbHandler.toggleDeviceForUser"
+          :toggle-device-for-admin="dbHandler.toggleDeviceForAdmin"
         />
       </v-dialog>
       <v-row>
@@ -112,7 +120,7 @@
               <v-list-item ripple @click="selectAllDevices">
                 <v-list-item-action>
                   <v-icon
-                    :color="selectedDevices.length > 0 ? 'indigo darken-4' : ''"
+                    :color="selectedDevices.length > 0 ? 'blue darken-2' : ''"
                   >
                     {{ icon }}
                   </v-icon>
@@ -194,7 +202,7 @@ import RequestHandler from "@/model/request-handler";
 import DatabaseHandler, {
   Device,
   EventTableItem,
-  User,
+  Admin,
 } from "@/model/db-handler";
 import CognitoIdentity from "@/model/cognito-identity";
 import { MIN_ERROR_THRESHOLD } from "@/constants";
@@ -211,11 +219,12 @@ const auth = new CognitoAuth({
   RedirectUriSignIn: HostName,
   RedirectUriSignOut: HostName,
 });
+auth.isUserSignedIn();
 const cognitoIdentity = CognitoIdentity(auth);
 const dbHandler = DatabaseHandler(
   auth.getUsername(),
   cognitoIdentity.credentials,
-  cognitoIdentity.isAdmin
+  cognitoIdentity.isSuperAdmin
 );
 const today = new Date();
 const todayDate = `${today.getFullYear()}-${
@@ -239,7 +248,8 @@ export default class App extends Vue {
     currentUser: string | null;
   } = { loggedIn: false, currentUser: null };
   private devices: Record<string, Device> = {};
-  private invitedUsers: User[] = [];
+  private adminUsers: Admin[] = [];
+  private currAdmin: Admin | undefined = undefined;
   private qrUsers: string[] = [];
   private selectedDevices: string[] = [];
   private eventItems: EventTableItem[] = [];
@@ -249,7 +259,7 @@ export default class App extends Vue {
   private showDevicesOverview = false;
   private requestHandler = RequestHandler(auth);
   private dbHandler = dbHandler;
-  private isAdmin = cognitoIdentity.isAdmin;
+  private isSuperAdmin = cognitoIdentity.isSuperAdmin;
   private toggleTimespan = 0;
 
   private timespans = [
@@ -281,7 +291,6 @@ export default class App extends Vue {
       value: "device",
       width: 240,
     },
-    ...(this.events.findIndex(val => val.qrid) !== undefined && {text: "ID", value: "qrid", width: 120}),
     {
       text: "Screened Temp C",
       value: "displayedTemperature",
@@ -298,6 +307,10 @@ export default class App extends Vue {
       width: 240,
     },
   ];
+
+  get hasQRID(): boolean {
+    return true;
+  }
 
   get selectedAllDevices() {
     return this.selectedDevices.length === this.deviceIds.length;
@@ -346,8 +359,6 @@ export default class App extends Vue {
   }
 
   get events(): EventTableItem[] {
-    dbHandler.getDeviceEvents("fs-1217", { startDate: "", endDate: "" });
-
     return this.eventItems.map((eventItem: EventTableItem) => ({
       ...eventItem,
       device: this.devices[eventItem.device].name,
@@ -444,13 +455,10 @@ export default class App extends Vue {
     if (index[0] !== undefined) {
       const i = index[0] === "time" ? "timestamp" : index[0];
       if (isDesc[0]) {
-        items.sort((a: EventTableItem, b: EventTableItem) =>
-          a[i] < b[i] ? 1 : -1
-        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        items.sort((a: any, b: any) => (a[i] < b[i] ? 1 : -1));
       } else {
-        items.sort((a: EventTableItem, b: EventTableItem) =>
-          a[i] > b[i] ? 1 : -1
-        );
+        items.sort((a: any, b: any) => (a[i] > b[i] ? 1 : -1));
       }
     }
     return items;
@@ -526,7 +534,9 @@ export default class App extends Vue {
       }
     }
     this.devices = await dbHandler.getDevices();
-    this.invitedUsers = await dbHandler.getInvitedUsers();
+    if (this.isSuperAdmin) {
+      this.adminUsers = await dbHandler.getAdminUsers();
+    }
     this.qrUsers = await dbHandler.getQRUsers();
 
     this.selectedDevices = this.selectedDevices.filter((device) =>
@@ -571,7 +581,14 @@ export default class App extends Vue {
       .sort((a: EventTableItem, b: EventTableItem) =>
         a.timestamp < b.timestamp ? 1 : -1
       );
-
+    if (
+      this.eventItems.find((event) => event.qrid) &&
+      this.headers[1].value !== "qrid"
+    ) {
+      this.headers.splice(1, 0, { text: "ID", value: "qrid", width: 100 });
+    } else if (this.headers[1].value === "qrid") {
+      this.headers.splice(1, 1);
+    }
     this.dataIsLoading = false;
   }
 

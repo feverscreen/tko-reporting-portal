@@ -14,7 +14,16 @@ if (
   window.location.href = `https://${window.location.host}`;
 }
 
+const routes = [
+  {path: '/', component: new App()}
+]
+
+const router = new VueRouter({
+  mode: 'history',
+  routes});
+
 new Vue({
   vuetify,
+  router,
   render: (h) => h(App),
 }).$mount("#app");

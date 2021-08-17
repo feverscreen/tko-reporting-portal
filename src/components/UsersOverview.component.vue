@@ -1,5 +1,48 @@
 <template>
   <v-card>
+    <v-card-title
+      v-if="isSuperAdmin"
+      class="d-flex align-center justify-space-between"
+    >
+      Admins Overview
+    </v-card-title>
+    <v-data-table
+      v-if="isSuperAdmin"
+      :items="adminUsers"
+      :headers="adminHeaders"
+      dense
+    >
+      <template v-slot:[`item.organization`]="{ item }">
+        <v-select
+          v-model="item.organization"
+          @change="(input) => changeOrg(input, item.username)"
+          :items="organizations"
+        >
+          <template v-slot:append-item>
+            <v-edit-dialog
+              large
+              @save="addNewOrg(item)"
+              @close="closeNewOrg()"
+              :return-value="item.organization"
+            >
+              <v-btn block large text color="blue" light>
+                Add Organization
+                <v-icon class="ml-1"> mdi-plus </v-icon>
+              </v-btn>
+              <template v-slot:input>
+                <v-text-field
+                  v-model="tempOrg"
+                  :rules="[validateOrg]"
+                  single-line
+                  clearable
+                  counter
+                ></v-text-field>
+              </template>
+            </v-edit-dialog>
+          </template>
+        </v-select>
+      </template>
+    </v-data-table>
     <v-card-title class="d-flex align-center justify-space-between">
       Users Overview
       <div>
@@ -11,7 +54,7 @@
     </v-card-title>
     <v-data-table
       :items="qrUsers"
-      :headers="headers"
+      :headers="qrHeaders"
       :items-per-page="20"
       dense
       show-select
@@ -30,7 +73,7 @@
             <v-text-field
               v-model="tempId"
               :label="item.id"
-              :rules="[validate]"
+              :rules="[validateQR]"
               single-line
               clearable
               counter
@@ -58,15 +101,20 @@
 
 <script lang="ts">
 import Vue, { PropType } from "vue";
-import { Device, User } from "@/model/db-handler";
+import { Admin } from "@/model/db-handler";
 import QRImage from "@/components/QRImage.component.vue";
 import QRCode from "qrcode";
 import printJS from "print-js";
 
 export default Vue.extend({
   props: {
+    isSuperAdmin: Boolean,
+    adminUsers: Array as PropType<Admin[]>,
     users: Array as PropType<string[]>,
-    updateQRUsers: Function as PropType<(userIds: string[]) => void>,
+    updateQRUser: Function as PropType<(org: string, userId: string) => void>,
+    updateAdminOrg: Function as PropType<
+      (adminId: string, organization: string) => void
+    >,
   },
   components: {
     QRImage,
@@ -75,11 +123,16 @@ export default Vue.extend({
     return {
       newUserDialog: false,
       tempUsers: [] as { id: string }[],
-      headers: [
+      qrHeaders: [
         { text: "User ID", value: "id" },
         { text: "QR Code", value: "qr" },
       ],
+      adminHeaders: [
+        { text: "Email", value: "email" },
+        { text: "Organization", value: "organization", width: "200px" },
+      ],
       tempId: "",
+      tempOrg: "",
     };
   },
   computed: {
@@ -88,14 +141,20 @@ export default Vue.extend({
         return [...this.users.map((id) => ({ id })), ...this.tempUsers];
       },
     },
+    organizations: {
+      get: function (): string[] {
+        return this.adminUsers
+          .map((user) => user.organization ?? "")
+          .filter((val) => val);
+      },
+    },
   },
   methods: {
-    async addNewUser() {
-      await this.tempUsers.push({ id: "" });
+    addNewUser() {
+      this.tempUsers.push({ id: "" });
       (this.$refs.tempEdit as any).isActive = true;
     },
-    validate(input: string): boolean | string {
-      console.log(input);
+    validateQR(input: string): boolean | string {
       if (input) {
         const duplicate =
           this.qrUsers.filter(({ id }) => id === input).length !== 0;
@@ -105,6 +164,19 @@ export default Vue.extend({
           : long
           ? "Max Characters 50"
           : "Duplicate ID found";
+      }
+      return true;
+    },
+    validateOrg(input: string): boolean | string {
+      if (input) {
+        const duplicate =
+          this.organizations.filter((id) => id === input).length !== 0;
+        const long = input.length > 50;
+        return !long && !duplicate
+          ? true
+          : long
+          ? "Max Characters 50"
+          : "Duplicate Name found";
       }
       return true;
     },
@@ -122,9 +194,6 @@ export default Vue.extend({
         }
       }
       this.tempId = "";
-      this.updateQRUsers(
-        this.qrUsers.map(({ id }) => id).filter((id) => id !== "")
-      );
     },
     async printQR(id: string) {
       const qrimg = await QRCode.toDataURL(
@@ -132,6 +201,16 @@ export default Vue.extend({
         id
       );
       printJS({ printable: qrimg, type: "image", imageStyle: "width:400px" });
+    },
+    closeNewOrg() {
+      this.tempOrg = "";
+    },
+    addNewOrg(admin: Admin) {
+      admin.organization = this.tempOrg;
+      this.changeOrg(this.tempOrg, admin.username);
+    },
+    changeOrg(org: string, username: string) {
+      this.updateAdminOrg(username, org);
     },
   },
 });
