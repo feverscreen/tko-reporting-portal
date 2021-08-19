@@ -6,7 +6,6 @@ import {
   COGNITO_ID as cognitoId,
   REGION as region,
   IDENTITY_POOL_ID as identityPoolId,
-  ADMIN_ROLE_ARN as customRoleArn,
 } from "@/constants";
 import { CognitoAuth } from "amazon-cognito-auth-js";
 import { fromCognitoIdentityPool } from "@aws-sdk/credential-provider-cognito-identity";

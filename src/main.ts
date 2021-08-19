@@ -2,10 +2,8 @@ import Vue from "vue";
 import App from "./App.vue";
 import vuetify from "@/plugins/vuetify";
 import VueRouter from "vue-router";
-import { Device } from "@/model/db-handler";
 
 Vue.config.productionTip = false;
-Vue.use(VueRouter);
 
 if (
   window.location.protocol === "http:" &&
@@ -24,6 +22,5 @@ const router = new VueRouter({
 
 new Vue({
   vuetify,
-  router,
   render: (h) => h(App),
 }).$mount("#app");

@@ -10,6 +10,7 @@
           persistent
         >
           <template v-slot:activator="{ on, attrs }">
+            <div>
             <v-btn
               color="primary"
               dark
@@ -20,6 +21,7 @@
               New Device
               <v-icon class="ml-1 mb-1"> mdi-plus </v-icon>
             </v-btn>
+            </div>
           </template>
           <v-card>
             <v-card-title>
@@ -223,11 +225,12 @@
               <v-icon> mdi-format-list-bulleted-square </v-icon>
             </v-btn>
           </template>
-          <v-row
-            class="ma-0 white flex-nowrap"
+          <v-container
+            class="list-row-org ma-0 px-0 pb-0 pt-2 white flex-nowrap"
             v-for="org in organizations"
             :key="org"
           >
+            <v-row class="flex-nowrap px-8">
             <v-icon
               @click="toggleDeviceForOrg(org, item.id)"
               :color="
@@ -238,13 +241,13 @@
             >
               {{ iconOrg(org, item.id) }}
             </v-icon>
-            <v-list-group class="pr-3 list-item-org">
+            <v-list-group class="pr-3 list-item-org" :ripple="false">
               <template v-slot:activator>
                 <v-list-item-title min-width="100%">{{
                   org
                 }}</v-list-item-title>
               </template>
-              <v-list max-height="350" class="overflow-y-auto">
+              <v-list class="overflow-y-auto">
                 <v-list-item
                   v-for="user in adminUsers.filter(
                     (val) => val.organization === org
@@ -259,7 +262,9 @@
                 </v-list-item>
               </v-list>
             </v-list-group>
-          </v-row>
+            </v-row>
+            <v-divider></v-divider>
+          </v-container>
         </v-menu>
       </template>
     </v-data-table>
@@ -340,7 +345,7 @@ export default Vue.extend({
       const orgUsers = this.adminUsers.filter(
         (val) => val.organization === org
       );
-      const usersWithDevice = orgUsers.filter((user) => user.devices[device]);
+      const usersWithDevice = orgUsers.filter((user) => this.userHasDevice(user.devices, device));
       if (usersWithDevice.length === orgUsers.length) {
         return "mdi-checkbox-marked";
       } else if (usersWithDevice.length === 0) {
@@ -389,24 +394,24 @@ export default Vue.extend({
         const orgUsers = this.adminUsers.filter(
           (val) => val.organization === org
         );
-        const usersWithDevice = orgUsers.filter(
-          (user) => user.devices[deviceId]
+        const usersWithoutDevice = orgUsers.filter(
+          (user) => !this.userHasDevice(user.devices, deviceId)
         );
-        if (usersWithDevice.length === orgUsers.length) {
-          usersWithDevice.forEach(async (user) => {
-            user.devices[deviceId].disable = true;
-            await this.toggleDeviceForAdmin(device, user);
-          });
-        } else if (usersWithDevice.length === 0) {
-          usersWithDevice.forEach((user) => {
+        if (usersWithoutDevice.length !== orgUsers.length && usersWithoutDevice.length !== 0) {
+          usersWithoutDevice.forEach((user) => {
+            const userDevice = user.devices[deviceId]
             this.toggleDeviceForAdmin(device, user);
+            if (userDevice) {
+              userDevice.disable = false;
+            }
           });
         } else {
-          const usersWithoutDevice = orgUsers.filter(
-            (user) => !user.devices[deviceId]
-          );
-          usersWithoutDevice.forEach((user) => {
+          orgUsers.forEach(async (user) => {
+            const userDevice = user.devices[deviceId]
             this.toggleDeviceForAdmin(device, user);
+            if (userDevice) {
+              userDevice.disable = true;
+            }
           });
         }
       }

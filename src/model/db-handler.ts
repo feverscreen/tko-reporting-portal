@@ -26,11 +26,11 @@ export interface Admin {
 }
 
 export interface DBUserInfo {
-  Confirmed: {BOOL: boolean};
-  Email: {S: string};
-  Group?: {S: string};
   Username: {S: string};
-  Organization: {S: string};
+  Confirmed?: {BOOL: boolean};
+  Email?: {S: string};
+  Group?: {S: string};
+  Organization?: {S: string};
   Users?: {SS: string[]};
 }
 
@@ -75,7 +75,7 @@ export default function DatabaseHandler(
       const data = await ddbClient.send<ClientInput, ClientOutput>(command);
       return data;
     } catch (e) {
-      console.error(e);
+      console.error(e, command);
     }
   };
   const getItem = (params: clientDynamodb.GetItemCommandInput) => {
@@ -283,20 +283,6 @@ export default function DatabaseHandler(
       await updateItem(params);
     };
 
-    const updateQRUser = async (org: string, userId: string) => {
-      const params = {
-        TableName: "TeKahuOra",
-        Key: {
-          "PK": {S: org},
-          "SK": {S: `USER|${userId}`}
-      },
-      UpdateExpression: "set #id = :id",
-      ExpressionAttributeValues: {":id": { "S": userId}},
-      ExpressionAttributeNames: {"#id": "id"}
-    }
-      return updateItem(params);
-    }
-
     const updateAdminOrg = async (adminId: string, organization: string) => {
       const params = {
         TableName: "Users",
@@ -310,12 +296,11 @@ export default function DatabaseHandler(
       return updateItem(params);
     }
 
-
     const getUserInfo = async (ids: string[]): Promise<Admin[]> => {
       const params = {
         RequestItems:{ "Users": {
           Keys: ids.map(id => ({"Username": {"S": id}, })),
-          AttributesToGet: ["Username", "Email", "Confirmed", "Organization"]
+          AttributesToGet: ["Username", "Email", "Group", "Confirmed", "Organization"]
         }
       }};
       const result = await batchGetItem(params);
@@ -326,8 +311,8 @@ export default function DatabaseHandler(
           const organization = rest.Organization?.S ?? ""
           return {
             username: Username.S,
-            confirmed: Confirmed.BOOL,
-            email: Email.S,
+            confirmed: Confirmed?.BOOL,
+            email: Email?.S,
             group: Group?.S,
             users: Users?.SS,
             organization,
@@ -339,22 +324,37 @@ export default function DatabaseHandler(
       return [];
     };
 
-    const getQRUsers = async (): Promise<string[]> => {
+    const getQRUsers = async (organization: string): Promise<string[]> => {
       const params = {
-        TableName: "Users",
-        Key: {"Username": {"S": userId}},
-        AttributesToGet: ["Users"]
+        TableName: "TeKahuOra",
+        KeyConditionExpression: "PK = :org and begins_with(SK, :usr)",
+        ExpressionAttributeValues: {":org": {S: organization}, ":usr":{S: "USER"}}
       }
-      const result = await getItem(params);
-      const userIds = result?.Item?.Users?.SS;
-      return userIds ?? [];
+      const result = await query(params);
+      const userIds = result?.Items as {id: {S: string}, adminId: {S: string}}[] | undefined;
+      if (userIds) {
+        return userIds.map(val => val.id.S)
+      }
+      return [];
     }
+
+    const deleteQRUser = async (key: string, user: string): Promise<void> => {
+      const params = {
+        TableName: "TeKahuOra",
+        Key: {
+        PK: {"S": key},
+        SK: {"S": `USER|${user}`}
+      },
+      }
+      await deleteItem(params);
+    }
+
 
     const getAdminUsers = async (user = "USERS"): Promise<Admin[]> => {
       const params = {
         TableName: "Users",
         Key: {"Username": {"S": user}},
-        AttributesToGet: ["Username", "Email", "Confirmed", "Users"]
+        AttributesToGet: ["Username", "Email", "Confirmed", "Users", "Organization"]
       };
       const result = await getItem(params);
       const userIds = result?.Item?.Users?.SS
@@ -371,6 +371,45 @@ export default function DatabaseHandler(
 
       return [];
     };
+
+    const getCurrAdmin = async (): Promise<Admin|undefined> => {
+      const params = {
+        TableName: "Users",
+        Key: {"Username": {"S": userId}},
+        AttributesToGet: ["Username", "Email", "Group", "Confirmed", "Organization"]
+      }
+      const result = await getItem(params);
+      const info = result?.Item as DBUserInfo | undefined;
+      if (info) {
+          const {Username, Confirmed, Email, Group} = info;
+          const devices = await getDevices(Username.S);
+          const organization = info.Organization?.S ?? ""
+          return {
+            username: Username.S,
+            confirmed: Confirmed?.BOOL ?? false,
+            email: Email?.S,
+            group: Group?.S,
+            organization,
+            devices
+          } as Admin
+      }
+      return undefined;
+    }
+
+    const updateQRUser = async (key: string, qrId: string) => {
+      const params = {
+        TableName: "TeKahuOra",
+        Key: {
+          "PK": {S: key},
+          "SK": {S: `USER|${qrId}`}
+      },
+      UpdateExpression: "set #id = :id, #aid = :aid",
+      ExpressionAttributeValues: {":id": { "S": qrId}, ":aid": {"S":userId}},
+      ExpressionAttributeNames: {"#id": "id", "#aid": "adminId"}
+    }
+      return updateItem(params);
+    }
+
 
     const deleteDevice = async (deviceId: string) => {
       const users = await getAdminUsers();
@@ -466,9 +505,11 @@ export default function DatabaseHandler(
     getDevices,
     getUserInfo,
     getAdminUsers,
+    getCurrAdmin,
     getQRUsers,
     toggleDeviceForAdmin,
     deleteDevice,
+    deleteQRUser,
     updateDeviceName,
     updateDeviceLabel,
     updateDeviceRecord,

@@ -17,15 +17,16 @@
         </v-toolbar>
       </v-row>
       <v-dialog
-        :isSuperAdmin="isSuperAdmin"
         ref="dialog"
         v-model="showUsersOverview"
-        :max-width="isSuperAdmin ? 600 : 450"
+        :max-width="isSuperAdmin ? 600 : 550"
       >
         <usersOverview
+          :isSuperAdmin="isSuperAdmin"
           :adminUsers="adminUsers"
           :users="qrUsers"
-          :updateQRUser="dbHandler.updateQRUser"
+          :updateQRUser="updateQRUser"
+          :deleteQRUsers="deleteQRUsers"
           :updateAdminOrg="dbHandler.updateAdminOrg"
         />
       </v-dialog>
@@ -219,7 +220,6 @@ const auth = new CognitoAuth({
   RedirectUriSignIn: HostName,
   RedirectUriSignOut: HostName,
 });
-auth.isUserSignedIn();
 const cognitoIdentity = CognitoIdentity(auth);
 const dbHandler = DatabaseHandler(
   auth.getUsername(),
@@ -249,7 +249,6 @@ export default class App extends Vue {
   } = { loggedIn: false, currentUser: null };
   private devices: Record<string, Device> = {};
   private adminUsers: Admin[] = [];
-  private currAdmin: Admin | undefined = undefined;
   private qrUsers: string[] = [];
   private selectedDevices: string[] = [];
   private eventItems: EventTableItem[] = [];
@@ -421,11 +420,17 @@ export default class App extends Vue {
       onSuccess: (_session: CognitoAuthSession): void => {
         this.loggedInStatus.currentUser = auth.getCurrentUser();
         this.loggedInStatus.loggedIn = true;
+        const cognitoIdentity = CognitoIdentity(auth);
+        this.dbHandler = DatabaseHandler(
+          auth.getUsername(),
+          cognitoIdentity.credentials,
+          cognitoIdentity.isSuperAdmin
+        );
+        this.isSuperAdmin = cognitoIdentity.isSuperAdmin
         if (window.location.href.includes("?code=")) {
           window.location.href = HostName;
-        } else {
-          this.init();
-        }
+        } 
+        this.init();
       },
       onFailure: () => {
         auth.signOut();
@@ -436,16 +441,16 @@ export default class App extends Vue {
     if (window.location.href.includes("?code=")) {
       auth.parseCognitoWebResponse(window.location.href);
     } else if (!auth.isUserSignedIn()) {
-      setTimeout(() => {
-        if (!auth.isUserSignedIn()) {
-          // This triggers a redirect to the login page.
-          auth.getSession();
-        }
-      }, 1000);
+       setTimeout(() => {
+         if (!auth.isUserSignedIn()) {
+           // This triggers a redirect to the login page.
+           auth.getSession();
+         }
+       }, 1000);
     } else {
       auth.getSession();
     }
-  }
+    }
 
   sortItems(
     items: EventTableItem[],
@@ -533,11 +538,14 @@ export default class App extends Vue {
         // Do nothing
       }
     }
-    this.devices = await dbHandler.getDevices();
+    this.devices = await this.dbHandler.getDevices();
     if (this.isSuperAdmin) {
-      this.adminUsers = await dbHandler.getAdminUsers();
+      this.adminUsers = await this.dbHandler.getAdminUsers();
     }
-    this.qrUsers = await dbHandler.getQRUsers();
+    const currAdmin = await this.dbHandler.getCurrAdmin();
+    if (currAdmin && currAdmin.organization) {
+      this.qrUsers = await this.dbHandler.getQRUsers(currAdmin.organization);
+    }
 
     this.selectedDevices = this.selectedDevices.filter((device) =>
       Object.keys(this.devices).includes(device)
@@ -558,10 +566,34 @@ export default class App extends Vue {
             this.dateRangeForSelectedTimespan
           );
         } else {
-          this.devices = await dbHandler.getDevices();
+          this.devices = await this.dbHandler.getDevices();
         }
       }
     }, 1000 * 60);
+  }
+  
+  async qrKey(): Promise<string|undefined> {
+    const currAdmin = await this.dbHandler.getCurrAdmin();
+    const key = currAdmin?.organization ?? currAdmin?.username
+    return key;
+  }
+  
+  async updateQRUser(qrid: string) {
+    const key = await this.qrKey()
+    if (key) {
+      this.dbHandler.updateQRUser(key, qrid);
+      if (!this.qrUsers.includes(qrid)) {
+        this.qrUsers.push(qrid);
+      }
+    }
+  }
+
+  async deleteQRUsers(qrIds: string[]) {
+    const key = await this.qrKey()
+    if (key) {
+       qrIds.forEach(val => this.dbHandler.deleteQRUser(key, val));
+       this.qrUsers = this.qrUsers.filter( user => !qrIds.includes(user))
+    }
   }
 
   async fetchEventsForDevices(
