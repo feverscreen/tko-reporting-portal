@@ -129,7 +129,7 @@
         </v-edit-dialog>
       </template>
       <template v-slot:[`item.qr`]="{ item }">
-        <v-dialog max-width="150" hide-overlay>
+        <v-dialog max-width="160" hide-overlay>
           <template v-slot:activator="{ on, attrs }">
             <v-btn text v-bind="attrs" v-on="on"
               ><v-icon>mdi-qrcode</v-icon></v-btn
@@ -140,6 +140,14 @@
         <v-btn text @click="printQR(item.id)">
           <v-icon>mdi-printer</v-icon></v-btn
         >
+        <v-dialog v-if="item.id">
+          <template v-slot:activator="{ on, attrs }">
+            <v-btn text v-bind="attrs" v-on="on"
+              ><v-icon>mdi-chart-timeline-variant</v-icon></v-btn
+            >
+          </template>
+          <QRUserStats :qrid="item.id"></QRUserStats>
+        </v-dialog>
       </template>
     </v-data-table>
     <canvas ref="qrImage" hidden></canvas>
@@ -150,6 +158,7 @@
 import Vue, { PropType } from "vue";
 import { Admin } from "@/model/db-handler";
 import QRImage from "@/components/QRImage.component.vue";
+import QRUserStats from "@/components/QRUserStats.component.vue";
 import QRCode from "qrcode";
 import printJS from "print-js";
 import {v4} from "uuid"
@@ -167,6 +176,7 @@ export default Vue.extend({
   },
   components: {
     QRImage,
+    QRUserStats
   },
   data: function () {
     return {

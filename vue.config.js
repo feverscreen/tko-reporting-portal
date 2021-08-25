@@ -1,9 +1,9 @@
 module.exports = {
   chainWebpack: (config) => {
-    config.plugin("VuetifyLoaderPlugin").tap((args) => [
+    config.plugin('VuetifyLoaderPlugin').tap((args) => [
       {
         match(originalTag, { kebabTag, camelTag, path, component }) {
-          if (kebabTag.startsWith("core-")) {
+          if (kebabTag.startsWith('core-')) {
             return [
               camelTag,
               `import ${camelTag} from '@/components/core/${camelTag.substring(
@@ -16,5 +16,5 @@ module.exports = {
     ]);
   },
 
-  transpileDependencies: ["vuetify"],
+  transpileDependencies: ['vuetify'],
 };

@@ -1,9 +1,17 @@
-import clientDynamodb, {DynamoDBClient, GetItemCommand, BatchGetItemCommand, QueryCommand, PutItemCommand, DeleteItemCommand, UpdateItemCommand} from "@aws-sdk/client-dynamodb";
-import { Command, HttpHandlerOptions } from "@aws-sdk/types";
-import { SmithyResolvedConfiguration } from "@aws-sdk/smithy-client";
-import { CognitoIdentityCredentialProvider } from "@aws-sdk/credential-provider-cognito-identity";
-import { formatTime } from "@/model/utils"
-import { REGION as region, MIN_ERROR_THRESHOLD } from "@/constants";
+import clientDynamodb, {
+  DynamoDBClient,
+  GetItemCommand,
+  BatchGetItemCommand,
+  QueryCommand,
+  PutItemCommand,
+  DeleteItemCommand,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb';
+import { Command, HttpHandlerOptions } from '@aws-sdk/types';
+import { SmithyResolvedConfiguration } from '@aws-sdk/smithy-client';
+import { CognitoIdentityCredentialProvider } from '@aws-sdk/credential-provider-cognito-identity';
+import { formatTime, formatTsc } from '@/model/utils';
+import { REGION as region, MIN_ERROR_THRESHOLD } from '@/constants';
 
 export interface Device {
   name: string;
@@ -26,22 +34,22 @@ export interface Admin {
 }
 
 export interface DBUserInfo {
-  Username: {S: string};
-  Confirmed?: {BOOL: boolean};
-  Email?: {S: string};
-  Group?: {S: string};
-  Organization?: {S: string};
-  Users?: {SS: string[]};
+  Username: { S: string };
+  Confirmed?: { BOOL: boolean };
+  Email?: { S: string };
+  Group?: { S: string };
+  Organization?: { S: string };
+  Users?: { SS: string[] };
 }
-
 
 export interface EventTableItem {
   displayedTemperature: number;
   threshold: number;
-  result: "Fever" | "Normal" | "Error";
-  timestamp: Date;
+  result: 'Fever' | 'Normal' | 'Error';
   device: string;
+  timestamp: Date;
   time: string;
+  tsc: string;
   qrid: string;
   //[key: string]: string | number | Date;
 }
@@ -53,12 +61,52 @@ export interface DynamoEventItem {
   uid: string;
 }
 
+type event = {
+  disp?: { N: number };
+  tsc?: { S: string };
+  uid?: { S: string };
+  qrid?: { S: string };
+  fth?: { N: number };
+};
+
 export default function DatabaseHandler(
   userId: string,
   auth: CognitoIdentityCredentialProvider,
   admin = false
 ) {
   const ddbClient = new DynamoDBClient({ region, credentials: auth });
+  const parseEventItem = (item: event) => {
+    const temp = Number(item.disp?.N ?? 0);
+    const tsc = item.tsc?.S ?? '';
+    const device = item.uid?.S ?? '';
+    const qrid = item.qrid?.S ?? '';
+    const threshold = Number(item.fth?.N ?? 0);
+
+    const displayedTemperature = Number(temp.toFixed(2));
+
+    const result =
+      temp > MIN_ERROR_THRESHOLD
+        ? 'Error'
+        : temp > threshold
+        ? 'Fever'
+        : 'Normal';
+
+    const timestamp = formatTsc(tsc);
+    const time = formatTime(timestamp);
+
+    const eventTableItem: EventTableItem = {
+      device,
+      displayedTemperature,
+      threshold,
+      result,
+      timestamp,
+      time,
+      tsc,
+      qrid,
+    };
+    return eventTableItem;
+  };
+
   const dbsend = async <
     ClientInput extends clientDynamodb.ServiceInputTypes,
     ClientOutput extends clientDynamodb.ServiceOutputTypes
@@ -97,416 +145,463 @@ export default function DatabaseHandler(
     return dbsend(new UpdateItemCommand(params));
   };
 
-  const updateDeviceDisable = async (user: string, device: string, disable: boolean): Promise<boolean> => {
-      const params = {
-        TableName: "UserDevices",
-        Key: {
-          ["Username"]: { S: user},
-          ["DeviceId"]: { S: device },
+  const updateDeviceDisable = async (
+    user: string,
+    device: string,
+    disable: boolean
+  ): Promise<boolean> => {
+    const params = {
+      TableName: 'UserDevices',
+      Key: {
+        ['Username']: { S: user },
+        ['DeviceId']: { S: device },
+      },
+      UpdateExpression: 'set Disabled = :dis',
+      ExpressionAttributeValues: {
+        ':dis': {
+          BOOL: disable,
         },
-        UpdateExpression: "set Disabled = :dis",
-        ExpressionAttributeValues: {
-          ":dis": {
-            BOOL: disable
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      }
-      const result = await updateItem(params);
-      const toggle = result?.Attributes?.Disabled.BOOL
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    const result = await updateItem(params);
+    const toggle = result?.Attributes?.Disabled.BOOL;
 
-      return toggle ? toggle : false;
-    }
+    return toggle ? toggle : false;
+  };
 
   const getDeviceInfo = async (
     device: string
-    ): Promise<{recordUserActivity: boolean; qrMode: boolean; labelName: string}> => {
-      const params = {
-        TableName: "DeviceInfo",
-        Key: {"uid": {"S": device}},
-        AttributesToGet: ["recordUserActivity", "labelName"]
-      };
+  ): Promise<{
+    recordUserActivity: boolean;
+    qrMode: boolean;
+    labelName: string;
+  }> => {
+    const params = {
+      TableName: 'DeviceInfo',
+      Key: { uid: { S: device } },
+      AttributesToGet: ['recordUserActivity', 'labelName'],
+    };
 
-      const result = await getItem(params);
+    const result = await getItem(params);
 
-      const recordUserActivity = result?.Item?.recordUserActivity?.BOOL ?? false;
-      const qrMode = result?.Item?.qrMode?.BOOL ?? true;
-      const labelName = result?.Item?.labelName?.S ?? device;
+    const recordUserActivity = result?.Item?.recordUserActivity?.BOOL ?? false;
+    const qrMode = result?.Item?.qrMode?.BOOL ?? true;
+    const labelName = result?.Item?.labelName?.S ?? device;
 
-      return {recordUserActivity , qrMode, labelName}
-    }
+    return { recordUserActivity, qrMode, labelName };
+  };
 
   const putDevice = async (user = userId, device: Device) => {
-      const userDeviceParams = {
-        TableName: "UserDevices",
-        Item: {
-          'Username' : {S: user},
-          'DeviceId' : {S: device.id}
-        }
-      }
-      const deviceParams = {
-        TableName: "DeviceInfo",
-        Item: {
-          'uid' : {S: device.id},
-          'recordUserActivity' : {BOOL: false},
-          'labelName' : {S: device.label}
-        }
-      }
-
-      await putItem(userDeviceParams);
-      await putItem(deviceParams);
-    };
-
-    const getDevices = async (user = userId): Promise<Record<string, Device>>  => {
-      const TableName = "UserDevices";
-      const params = {
-        TableName,
-        ExpressionAttributeValues: {
-          ":user": {
-            S: user,
-          },
-        },
-        KeyConditionExpression: "Username = :user ",
-        ProjectionExpression: "DeviceId, UserDeviceName, AlertsEnabled, Disabled",
-      };
-      const result = await query(params);
-      const items = result?.Items ?? [];
-      const devices = await Promise.all(items
-        .filter(({Disabled}) => Disabled?.BOOL !== true || admin)
-        .map( async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
-          const {labelName, qrMode, recordUserActivity} = await getDeviceInfo(DeviceId.S ?? "");
-          return ({
-          [DeviceId.S as string]: {
-            id: DeviceId.S,
-            label: labelName,
-            name: ((UserDeviceName && UserDeviceName.S) ||
-              labelName) as string,
-            record: recordUserActivity,
-            qr: qrMode,
-            alerts: (AlertsEnabled && AlertsEnabled.S === "true") || false,
-            disable: Disabled && Disabled.BOOL
-          } as Device,
-        })}))
-      return Object.assign({}, ...devices)
-    };
-
-    const updateDeviceLabel = async ( device: string, newLabel: string) => {
-      const params = {
-        TableName: "DeviceInfo",
-        Key: {
-          ["uid"]: { S: device },
-        },
-        UpdateExpression: "set labelName = :l",
-        ExpressionAttributeValues: {
-          ":l": {
-            S: newLabel.length > 0 ? newLabel : device,
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      };
-      const result = await updateItem(params);
-
-      return result;
-    };
-
-    const updateDeviceName = async ( device: string, newName: string) => {
-      const params = {
-        TableName: "UserDevices",
-        Key: {
-          ["Username"]: { S: userId},
-          ["DeviceId"]: { S: device },
-        },
-        UpdateExpression: "set UserDeviceName = :udn",
-        ExpressionAttributeValues: {
-          ":udn": {
-            S: newName.length > 0 ? newName : device,
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      };
-      const result = await updateItem(params);
-
-      return result;
-    };
-
-    const updateDeviceRecord = async (device: string, record: boolean) => {
-      const params = {
-        TableName: "DeviceInfo",
-        Key: {
-          ["uid"]: { S: device },
-        },
-        UpdateExpression: "set recordUserActivity = :r",
-        ExpressionAttributeValues: {
-          ":r": {
-            BOOL: record,
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      };
-      await updateItem(params);
-    };
-
-    const updateDeviceQR = async (device: string, qrMode: boolean) => {
-      const params = {
-        TableName: "UserDevices",
-        Key: {
-          "Username": { S: userId },
-          "DeviceId": { S: device },
-        },
-        UpdateExpression: "set qrMode = :qr",
-        ExpressionAttributeValues: {
-          ":qr": {
-            S: qrMode ? "true" : "false",
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      };
-      await updateItem(params);
-    };
-
-
-    const updateDeviceAlerts = async (device: string, alert: boolean) => {
-      const params = {
-        TableName: "UserDevices",
-        Key: {
-          "Username": { S: userId },
-          "DeviceId": { S: device },
-        },
-        UpdateExpression: "set AlertsEnabled = :ae",
-        ExpressionAttributeValues: {
-          ":ae": {
-            S: alert ? "true" : "false",
-          },
-        },
-        ReturnValues: "UPDATED_NEW",
-      };
-      await updateItem(params);
-    };
-
-    const updateAdminOrg = async (adminId: string, organization: string) => {
-      const params = {
-        TableName: "Users",
-        Key: {
-          "Username": {S: adminId}
+    const userDeviceParams = {
+      TableName: 'UserDevices',
+      Item: {
+        Username: { S: user },
+        DeviceId: { S: device.id },
       },
-      UpdateExpression: "set #org = :org",
-      ExpressionAttributeValues: {":org": { "S": organization}},
-      ExpressionAttributeNames: {"#org": "Organization"}
-    }
-      return updateItem(params);
-    }
+    };
+    const deviceParams = {
+      TableName: 'DeviceInfo',
+      Item: {
+        uid: { S: device.id },
+        recordUserActivity: { BOOL: false },
+        labelName: { S: device.label },
+      },
+    };
 
-    const getUserInfo = async (ids: string[]): Promise<Admin[]> => {
-      const params = {
-        RequestItems:{ "Users": {
-          Keys: ids.map(id => ({"Username": {"S": id}, })),
-          AttributesToGet: ["Username", "Email", "Group", "Confirmed", "Organization"]
-        }
-      }};
-      const result = await batchGetItem(params);
-      const info = result?.Responses?.Users as DBUserInfo[] | undefined;
-      if (info) {
-        return Promise.all(info.map(async ({Username, Confirmed, Email, Group, Users, ...rest}) => {
-          const devices = await getDevices(Username.S);
-          const organization = rest.Organization?.S ?? ""
+    await putItem(userDeviceParams);
+    await putItem(deviceParams);
+  };
+
+  const getDevices = async (user = userId): Promise<Record<string, Device>> => {
+    const TableName = 'UserDevices';
+    const params = {
+      TableName,
+      ExpressionAttributeValues: {
+        ':user': {
+          S: user,
+        },
+      },
+      KeyConditionExpression: 'Username = :user ',
+      ProjectionExpression: 'DeviceId, UserDeviceName, AlertsEnabled, Disabled',
+    };
+    const result = await query(params);
+    const items = result?.Items ?? [];
+    const devices = await Promise.all(
+      items
+        //.filter(({ Disabled }) => Disabled?.BOOL !== true || admin)
+        .map(async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
+          const { labelName, qrMode, recordUserActivity } = await getDeviceInfo(
+            DeviceId.S ?? ''
+          );
           return {
-            username: Username.S,
-            confirmed: Confirmed?.BOOL,
-            email: Email?.S,
-            group: Group?.S,
-            users: Users?.SS,
-            organization,
-            devices
-          } as Admin
-        }))
-      }
-
-      return [];
-    };
-
-    const getQRUsers = async (organization: string): Promise<string[]> => {
-      const params = {
-        TableName: "TeKahuOra",
-        KeyConditionExpression: "PK = :org and begins_with(SK, :usr)",
-        ExpressionAttributeValues: {":org": {S: organization}, ":usr":{S: "USER"}}
-      }
-      const result = await query(params);
-      const userIds = result?.Items as {id: {S: string}, adminId: {S: string}}[] | undefined;
-      if (userIds) {
-        return userIds.map(val => val.id.S)
-      }
-      return [];
-    }
-
-    const deleteQRUser = async (key: string, user: string): Promise<void> => {
-      const params = {
-        TableName: "TeKahuOra",
-        Key: {
-        PK: {"S": key},
-        SK: {"S": `USER|${user}`}
-      },
-      }
-      await deleteItem(params);
-    }
-
-
-    const getAdminUsers = async (user = "USERS"): Promise<Admin[]> => {
-      const params = {
-        TableName: "Users",
-        Key: {"Username": {"S": user}},
-        AttributesToGet: ["Username", "Email", "Confirmed", "Users", "Organization"]
-      };
-      const result = await getItem(params);
-      const userIds = result?.Item?.Users?.SS
-      if (userIds) {
-        const info = await getUserInfo(userIds)
-        const users = info.sort((a, b) => {
-          const n1 = a.email.toLowerCase();
-          const n2 = b.email.toLowerCase();
-          return n1 < n2 ? -1 : n1 > n2 ? 1 : 0;
+            [DeviceId.S as string]: {
+              id: DeviceId.S,
+              label: labelName,
+              name: ((UserDeviceName && UserDeviceName.S) ||
+                labelName) as string,
+              record: recordUserActivity,
+              qr: qrMode,
+              alerts: (AlertsEnabled && AlertsEnabled.S === 'true') || false,
+              disable: Disabled && Disabled.BOOL,
+            } as Device,
+          };
         })
+    );
+    return Object.assign({}, ...devices);
+  };
 
-        return users 
-      }
-
-      return [];
-    };
-
-    const getCurrAdmin = async (): Promise<Admin|undefined> => {
-      const params = {
-        TableName: "Users",
-        Key: {"Username": {"S": userId}},
-        AttributesToGet: ["Username", "Email", "Group", "Confirmed", "Organization"]
-      }
-      const result = await getItem(params);
-      const info = result?.Item as DBUserInfo | undefined;
-      if (info) {
-          const {Username, Confirmed, Email, Group} = info;
-          const devices = await getDevices(Username.S);
-          const organization = info.Organization?.S ?? ""
-          return {
-            username: Username.S,
-            confirmed: Confirmed?.BOOL ?? false,
-            email: Email?.S,
-            group: Group?.S,
-            organization,
-            devices
-          } as Admin
-      }
-      return undefined;
-    }
-
-    const updateQRUser = async (key: string, qrId: string) => {
-      const params = {
-        TableName: "TeKahuOra",
-        Key: {
-          "PK": {S: key},
-          "SK": {S: `USER|${qrId}`}
+  const updateDeviceLabel = async (device: string, newLabel: string) => {
+    const params = {
+      TableName: 'DeviceInfo',
+      Key: {
+        ['uid']: { S: device },
       },
-      UpdateExpression: "set #id = :id, #aid = :aid",
-      ExpressionAttributeValues: {":id": { "S": qrId}, ":aid": {"S":userId}},
-      ExpressionAttributeNames: {"#id": "id", "#aid": "adminId"}
-    }
-      return updateItem(params);
-    }
+      UpdateExpression: 'set labelName = :l',
+      ExpressionAttributeValues: {
+        ':l': {
+          S: newLabel.length > 0 ? newLabel : device,
+        },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    const result = await updateItem(params);
 
+    return result;
+  };
 
-    const deleteDevice = async (deviceId: string) => {
-      const users = await getAdminUsers();
-      users.filter(user => user.devices[deviceId])
-      .forEach(async (user) => { 
-        const params = {
-          TableName: "UserDevices",
-          Key: {
-            Username: {S: user.username},
-            DeviceId: {S: deviceId}
+  const updateDeviceName = async (device: string, newName: string) => {
+    const params = {
+      TableName: 'UserDevices',
+      Key: {
+        ['Username']: { S: userId },
+        ['DeviceId']: { S: device },
+      },
+      UpdateExpression: 'set UserDeviceName = :udn',
+      ExpressionAttributeValues: {
+        ':udn': {
+          S: newName.length > 0 ? newName : device,
+        },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    const result = await updateItem(params);
+
+    return result;
+  };
+
+  const updateDeviceRecord = async (device: string, record: boolean) => {
+    const params = {
+      TableName: 'DeviceInfo',
+      Key: {
+        ['uid']: { S: device },
+      },
+      UpdateExpression: 'set recordUserActivity = :r',
+      ExpressionAttributeValues: {
+        ':r': {
+          BOOL: record,
+        },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    await updateItem(params);
+  };
+
+  const updateDeviceQR = async (device: string, qrMode: boolean) => {
+    const params = {
+      TableName: 'UserDevices',
+      Key: {
+        Username: { S: userId },
+        DeviceId: { S: device },
+      },
+      UpdateExpression: 'set qrMode = :qr',
+      ExpressionAttributeValues: {
+        ':qr': {
+          S: qrMode ? 'true' : 'false',
+        },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    await updateItem(params);
+  };
+
+  const updateDeviceAlerts = async (device: string, alert: boolean) => {
+    const params = {
+      TableName: 'UserDevices',
+      Key: {
+        Username: { S: userId },
+        DeviceId: { S: device },
+      },
+      UpdateExpression: 'set AlertsEnabled = :ae',
+      ExpressionAttributeValues: {
+        ':ae': {
+          S: alert ? 'true' : 'false',
+        },
+      },
+      ReturnValues: 'UPDATED_NEW',
+    };
+    await updateItem(params);
+  };
+
+  const updateAdminOrg = async (adminId: string, organization: string) => {
+    const params = {
+      TableName: 'Users',
+      Key: {
+        Username: { S: adminId },
+      },
+      UpdateExpression: 'set #org = :org',
+      ExpressionAttributeValues: { ':org': { S: organization } },
+      ExpressionAttributeNames: { '#org': 'Organization' },
+    };
+    return updateItem(params);
+  };
+
+  const getUserInfo = async (ids: string[]): Promise<Admin[]> => {
+    const params = {
+      RequestItems: {
+        Users: {
+          Keys: ids.map((id) => ({ Username: { S: id } })),
+          AttributesToGet: [
+            'Username',
+            'Email',
+            'Group',
+            'Confirmed',
+            'Organization',
+          ],
+        },
+      },
+    };
+    const result = await batchGetItem(params);
+    const info = result?.Responses?.Users as DBUserInfo[] | undefined;
+    if (info) {
+      return Promise.all(
+        info.map(
+          async ({ Username, Confirmed, Email, Group, Users, ...rest }) => {
+            const devices = await getDevices(Username.S);
+            const organization = rest.Organization?.S ?? '';
+            return {
+              username: Username.S,
+              confirmed: Confirmed?.BOOL,
+              email: Email?.S,
+              group: Group?.S,
+              users: Users?.SS,
+              organization,
+              devices,
+            } as Admin;
           }
-        }
+        )
+      );
+    }
+
+    return [];
+  };
+
+  const getQRUsers = async (organization: string): Promise<string[]> => {
+    const params = {
+      TableName: 'TeKahuOra',
+      KeyConditionExpression: 'PK = :org and begins_with(SK, :usr)',
+      ExpressionAttributeValues: {
+        ':org': { S: organization },
+        ':usr': { S: 'USER' },
+      },
+    };
+    const result = await query(params);
+    const userIds = result?.Items as
+      | { id: { S: string }; adminId: { S: string } }[]
+      | undefined;
+    if (userIds) {
+      return userIds.map((val) => val.id.S);
+    }
+    return [];
+  };
+
+  const deleteQRUser = async (key: string, user: string): Promise<void> => {
+    const params = {
+      TableName: 'TeKahuOra',
+      Key: {
+        PK: { S: key },
+        SK: { S: `USER|${user}` },
+      },
+    };
+    await deleteItem(params);
+  };
+
+  const getAdminUsers = async (user = 'USERS'): Promise<Admin[]> => {
+    const params = {
+      TableName: 'Users',
+      Key: { Username: { S: user } },
+      AttributesToGet: [
+        'Username',
+        'Email',
+        'Confirmed',
+        'Users',
+        'Organization',
+      ],
+    };
+    const result = await getItem(params);
+    const userIds = result?.Item?.Users?.SS;
+    if (userIds) {
+      const info = await getUserInfo(userIds);
+      const users = info.sort((a, b) => {
+        const n1 = a.email.toLowerCase();
+        const n2 = b.email.toLowerCase();
+        return n1 < n2 ? -1 : n1 > n2 ? 1 : 0;
+      });
+
+      return users;
+    }
+
+    return [];
+  };
+
+  const getCurrAdmin = async (): Promise<Admin | undefined> => {
+    const params = {
+      TableName: 'Users',
+      Key: { Username: { S: userId } },
+      AttributesToGet: [
+        'Username',
+        'Email',
+        'Group',
+        'Confirmed',
+        'Organization',
+      ],
+    };
+    const result = await getItem(params);
+    const info = result?.Item as DBUserInfo | undefined;
+    if (info) {
+      const { Username, Confirmed, Email, Group } = info;
+      const devices = await getDevices(Username.S);
+      const organization = info.Organization?.S ?? '';
+      return {
+        username: Username.S,
+        confirmed: Confirmed?.BOOL ?? false,
+        email: Email?.S,
+        group: Group?.S,
+        organization,
+        devices,
+      } as Admin;
+    }
+    return undefined;
+  };
+
+  const updateQRUser = async (key: string, qrId: string) => {
+    const params = {
+      TableName: 'TeKahuOra',
+      Key: {
+        PK: { S: key },
+        SK: { S: `USER|${qrId}` },
+      },
+      UpdateExpression: 'set #id = :id, #aid = :aid',
+      ExpressionAttributeValues: { ':id': { S: qrId }, ':aid': { S: userId } },
+      ExpressionAttributeNames: { '#id': 'id', '#aid': 'adminId' },
+    };
+    return updateItem(params);
+  };
+
+  const deleteDevice = async (deviceId: string) => {
+    const users = await getAdminUsers();
+    users
+      .filter((user) => user.devices[deviceId])
+      .forEach(async (user) => {
+        const params = {
+          TableName: 'UserDevices',
+          Key: {
+            Username: { S: user.username },
+            DeviceId: { S: deviceId },
+          },
+        };
         await deleteItem(params);
       });
 
-      const deleteInfoParams = {
-        TableName: "DeviceInfo",
-        Key: {
-          "uid": {S: deviceId}
-        }
-      };
-      deleteItem(deleteInfoParams);
+    const deleteInfoParams = {
+      TableName: 'DeviceInfo',
+      Key: {
+        uid: { S: deviceId },
+      },
     };
+    deleteItem(deleteInfoParams);
+  };
 
-    const toggleDeviceForAdmin = async (device: Device, user: Admin) => {
-      const {id: deviceId} = device;
-      const {username} = user;
-      const userDevice = Object.values(user.devices).find(({id}) => id === deviceId);
-      if (userDevice) {
-        const disabled = await updateDeviceDisable(username, deviceId, !userDevice.disable)
-        if (username === userId) {
-          device.disable = disabled
-        }
-        userDevice.disable = disabled;
-      } else {
-        await putDevice(username, device);
+  const toggleDeviceForAdmin = async (device: Device, user: Admin) => {
+    const { id: deviceId } = device;
+    const { username } = user;
+    const userDevice = Object.values(user.devices).find(
+      ({ id }) => id === deviceId
+    );
+    if (userDevice) {
+      const disabled = await updateDeviceDisable(
+        username,
+        deviceId,
+        !userDevice.disable
+      );
+      if (username === userId) {
+        device.disable = disabled;
       }
+      userDevice.disable = disabled;
+    } else {
+      await putDevice(username, device);
+    }
+  };
+
+  const getQRUserEvents = async (
+    qrid: string
+  ): Promise<{ qrid: string; date: Date; reading: number }[]> => {
+    const params = {
+      TableName: 'Events',
+      IndexName: 'qrid-readings',
+      KeyConditionExpression: 'qrid = :id',
+      ExpressionAttributeValues: {
+        ':id': { S: qrid },
+      },
     };
-
-    const getDeviceEvents = async (
-      device: string,
-      timeFrame: { startDate: string; endDate?: string }
-    ): Promise<EventTableItem[]>  => {
-      const {startDate, endDate} = timeFrame;
-      const params = {
-        TableName: "Events",
-        KeyConditionExpression: "uid = :id AND sort BETWEEN :start and :end",
-        ExpressionAttributeValues: {
-          ":id": { S: device },
-          ":start": { S: `Screen|${startDate}` },
-          ":end": { S: `Screen|${endDate}` },
-        },
-      };
-      const result = await query(params);
-
-      const eventTableItems: EventTableItem[] | undefined = result?.Items?.map(item => {
-        const temp = Number(item.disp.N ?? 0);
-        const tsc = item.tsc.S ?? "";
-        const device = item.uid.S ?? "";
-        const qrid = item.qrid?.S ?? "";
-        const threshold = Number(item.fth.N ?? 0);
-         
-        const displayedTemperature = Number(temp.toFixed(2));
-
-        const result = temp > MIN_ERROR_THRESHOLD ? "Error" : temp > threshold ? "Fever" : "Normal";
-
-        const date = tsc.replace(/_/g, ":");
-        const lastHyphen = date.lastIndexOf(":");
-        const timestamp = new Date(
-          Date.parse(
-            `${date.substr(0, lastHyphen)}.${date.substr(lastHyphen + 1)}`
-          )
-        );
-        const time = formatTime(timestamp);
-
-        const eventTableItem: EventTableItem = {
-          device,
-          displayedTemperature,
-          threshold,
-          result,
-          timestamp,
-          time,
-          qrid
-        }
-        return eventTableItem
+    const result = await query(params);
+    const info = result?.Items as
+      | { disp?: { N: number }; tsc?: { S: string } }[]
+      | undefined;
+    if (info) {
+      return info.map((val) => {
+        const reading = val.disp?.N ?? 0;
+        const date = val.tsc?.S ?? '';
+        return { qrid, date: formatTsc(date), reading };
       });
-
-      return eventTableItems ? eventTableItems : [];
+    } else {
+      return [];
+    }
+  };
+  const getDeviceEvents = async (
+    device: string,
+    timeFrame: { startDate: string; endDate?: string }
+  ): Promise<EventTableItem[]> => {
+    const { startDate, endDate } = timeFrame;
+    const params = {
+      TableName: 'Events',
+      KeyConditionExpression: 'uid = :id AND sort BETWEEN :start and :end',
+      ExpressionAttributeValues: {
+        ':id': { S: device },
+        ':start': { S: `Screen|${startDate}` },
+        ':end': { S: `Screen|${endDate}` },
+      },
     };
+    const result = await query(params);
+
+    const eventTableItems: EventTableItem[] | undefined = result?.Items?.map(
+      (item: event) => {
+        return parseEventItem(item);
+      }
+    );
+
+    return eventTableItems ? eventTableItems : [];
+  };
 
   return {
+    // Dyanmo DB
     getDeviceEvents,
     getDevices,
     getUserInfo,
     getAdminUsers,
     getCurrAdmin,
     getQRUsers,
+    getQRUserEvents,
     toggleDeviceForAdmin,
     deleteDevice,
     deleteQRUser,
@@ -516,6 +611,6 @@ export default function DatabaseHandler(
     updateDeviceQR,
     updateDeviceAlerts,
     updateQRUser,
-    updateAdminOrg
+    updateAdminOrg,
   };
 }

@@ -183,6 +183,16 @@
                 {{ item.displayedTemperature }}
               </v-chip>
             </template>
+            <template v-slot:[`item.qrid`]="{ item }">
+              <v-dialog v-if="item.qrid">
+                <template v-slot:activator="{ on, attrs }">
+                  <v-row text class="my-2 mr-4" v-bind="attrs" v-on="on">
+                    {{ item.qrid }}
+                  </v-row>
+                </template>
+                <QRUserStats :qrid="item.qrid"></QRUserStats>
+              </v-dialog>
+            </template>
           </v-data-table>
         </v-col>
       </v-row>
@@ -191,23 +201,20 @@
 </template>
 
 <script lang="ts">
-import DownloadCsv from "download-csv";
-import VueApexCharts from "vue-apexcharts";
-import { Component, Vue } from "vue-property-decorator";
-import { DataTableHeader } from "vuetify";
+import DownloadCsv from 'download-csv';
+import VueApexCharts from 'vue-apexcharts';
+import { Component, Vue } from 'vue-property-decorator';
+import { DataTableHeader } from 'vuetify';
 
-import UserInfo from "@/model/user-info"
-import ScreeningChart from "@/components/ScreeningChart.component.vue";
-import devicesOverview from "@/components/DevicesOverview.component.vue";
-import usersOverview from "@/components/UsersOverview.component.vue";
-import { formatDate } from "@/model/utils";
-import {
-  Device,
-  EventTableItem,
-  Admin,
-} from "@/model/db-handler";
-import Auth from "@/model/auth"
-import { MIN_ERROR_THRESHOLD } from "@/constants";
+import UserInfo from '@/model/user-info';
+import ScreeningChart from '@/components/ScreeningChart.component.vue';
+import devicesOverview from '@/components/DevicesOverview.component.vue';
+import usersOverview from '@/components/UsersOverview.component.vue';
+import QRUserStats from '@/components/QRUserStats.component.vue';
+import { formatDate } from '@/model/utils';
+import { Device, EventTableItem, Admin } from '@/model/db-handler';
+import Auth from '@/model/auth';
+import { MIN_ERROR_THRESHOLD } from '@/constants';
 
 Vue.use(VueApexCharts);
 
@@ -222,7 +229,12 @@ interface SavedSettings {
 }
 
 @Component({
-  components: { apexchart: ScreeningChart, usersOverview, devicesOverview },
+  components: {
+    apexchart: ScreeningChart,
+    usersOverview,
+    devicesOverview,
+    QRUserStats,
+  },
 })
 export default class Home extends Vue {
   private devices: Record<string, Device> = {};
@@ -234,24 +246,25 @@ export default class Home extends Vue {
   private showDateRangePicker = false;
   private showUsersOverview = false;
   private showDevicesOverview = false;
-  private isSuperAdmin = UserInfo.state.cognitoCredentials?.isSuperAdmin ?? false;
+  private isSuperAdmin =
+    UserInfo.state.cognitoCredentials?.isSuperAdmin ?? false;
   private toggleTimespan = 0;
 
   private timespans = [
     {
-      text: "Last hour",
+      text: 'Last hour',
       value: { start: -1 }, // Relative hours to now.
     },
     {
-      text: "Last 24 hours",
+      text: 'Last 24 hours',
       value: { start: -24 },
     },
     {
-      text: "This week",
+      text: 'This week',
       value: { start: -(24 * 7) },
     },
     {
-      text: "Custom",
+      text: 'Custom',
       value: [todayDate, todayDate], // Concrete date ranges
     },
   ];
@@ -262,23 +275,23 @@ export default class Home extends Vue {
   // noinspection JSMismatchedCollectionQueryUpdate
   private headers: DataTableHeader[] = [
     {
-      text: "Device",
-      value: "device",
+      text: 'Device',
+      value: 'device',
       width: 240,
     },
     {
-      text: "Screened Temp C",
-      value: "displayedTemperature",
+      text: 'Screened Temp C',
+      value: 'displayedTemperature',
       width: 140,
     },
     {
-      text: "Fever Threshold C",
-      value: "threshold",
+      text: 'Fever Threshold C',
+      value: 'threshold',
       width: 120,
     },
     {
-      text: "Time",
-      value: "time",
+      text: 'Time',
+      value: 'time',
       width: 240,
     },
   ];
@@ -288,7 +301,7 @@ export default class Home extends Vue {
   }
 
   get dbHandler() {
-    return UserInfo.state.databaseHandler!
+    return UserInfo.state.databaseHandler!;
   }
 
   get hasQRID(): boolean {
@@ -300,10 +313,10 @@ export default class Home extends Vue {
   }
 
   get icon() {
-    if (this.selectedAllDevices) return "mdi-close-box";
+    if (this.selectedAllDevices) return 'mdi-close-box';
     if (this.selectedDevices.length > 0 && !this.selectedAllDevices)
-      return "mdi-minus-box";
-    return "mdi-checkbox-blank-outline";
+      return 'mdi-minus-box';
+    return 'mdi-checkbox-blank-outline';
   }
 
   get deviceIds(): { name: string; id: string }[] {
@@ -354,26 +367,26 @@ export default class Home extends Vue {
 
   get resultsSummaryText(): string {
     return `${this.eventItems.length} total screenings, ${
-      this.eventItems.filter((item) => item.result === "Fever").length
+      this.eventItems.filter((item) => item.result === 'Fever').length
     } screened as Fever`;
   }
 
   get numNormalEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Normal").length;
+    return this.eventItems.filter((item) => item.result === 'Normal').length;
   }
 
   get numErrorEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Error").length;
+    return this.eventItems.filter((item) => item.result === 'Error').length;
   }
 
   get numFeverEvents(): number {
-    return this.eventItems.filter((item) => item.result === "Fever").length;
+    return this.eventItems.filter((item) => item.result === 'Fever').length;
   }
 
   get temperatures() {
     return [
       {
-        name: "temperatures",
+        name: 'temperatures',
         data: this.eventItems.map(
           ({ displayedTemperature }) => displayedTemperature
         ),
@@ -398,53 +411,14 @@ export default class Home extends Vue {
     this.showDateRangePicker = false;
   }
 
-  //mounted(): void {
-  //  auth.userhandler = {
-  //    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  //    onSuccess: (_session: CognitoAuthSession): void => {
-  //      this.loggedInStatus.currentUser = auth.getCurrentUser();
-  //      this.loggedInStatus.loggedIn = true;
-  //      const cognitoIdentity = CognitoIdentity(auth);
-  //      this.dbHandler = DatabaseHandler(
-  //        auth.getUsername(),
-  //        cognitoIdentity.credentials,
-  //        cognitoIdentity.isSuperAdmin
-  //      );
-  //      this.isSuperAdmin = cognitoIdentity.isSuperAdmin
-  //      if (window.location.href.includes("?code=")) {
-  //        window.location.href = HostName;
-  //      } 
-  //      this.init();
-  //    },
-  //    onFailure: () => {
-  //      auth.signOut();
-  //    },
-  //  };
-  //  auth.useCodeGrantFlow();
-  //  // Or try and find an auth token in localStorage?
-  //  if (window.location.href.includes("?code=")) {
-  //    auth.parseCognitoWebResponse(window.location.href);
-  //  } else if (!auth.isUserSignedIn()) {
-  //     setTimeout(() => {
-  //       if (!auth.isUserSignedIn()) {
-  //         // This triggers a redirect to the login page.
-  //         auth.getSession();
-  //       }
-  //     }, 1000);
-  //  } else {
-  //    auth.getSession();
-  //  }
-  //  }
-
   sortItems(
     items: EventTableItem[],
     index: (string | undefined)[],
     isDesc: (boolean | undefined)[]
   ): EventTableItem[] {
     if (index[0] !== undefined) {
-      const i = index[0] === "time" ? "timestamp" : index[0];
+      const i = index[0] === 'time' ? 'timestamp' : index[0];
       if (isDesc[0]) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         items.sort((a: any, b: any) => (a[i] < b[i] ? 1 : -1));
       } else {
         items.sort((a: any, b: any) => (a[i] > b[i] ? 1 : -1));
@@ -461,39 +435,39 @@ export default class Home extends Vue {
 
   exportCsv() {
     let start = this.dateRangeForSelectedTimespan.startDate as string;
-    start = start.substr(0, start.lastIndexOf("_"));
+    start = start.substr(0, start.lastIndexOf('_'));
     let end =
       this.dateRangeForSelectedTimespan.endDate || formatDate(new Date());
-    end = end.substr(0, end.lastIndexOf("_"));
-    const range = `${start} - ${end}`.replace(/T/g, " ").replace(/_/g, "-");
+    end = end.substr(0, end.lastIndexOf('_'));
+    const range = `${start} - ${end}`.replace(/T/g, ' ').replace(/_/g, '-');
     DownloadCsv(
       this.events,
       {
-        device: "Device",
-        timestamp: "Date/Time",
-        displayedTemperature: "Screened Temp C",
-        threshold: "Fever Threshold C",
-        time: "Time",
-        result: "Screening Result",
+        device: 'Device',
+        timestamp: 'Date/Time',
+        displayedTemperature: 'Screened Temp C',
+        threshold: 'Fever Threshold C',
+        time: 'Time',
+        result: 'Screening Result',
       },
       `${this.selectedDevices
-        .map((device) => this.devices[device].name.replace(/,/g, ""))
-        .join("|")} -- ${range}.csv`
+        .map((device) => this.devices[device].name.replace(/,/g, ''))
+        .join('|')} -- ${range}.csv`
     );
   }
 
   getColorForItem(item: EventTableItem): string {
     if (item.displayedTemperature > MIN_ERROR_THRESHOLD) {
-      return "#B8860B";
+      return '#B8860B';
     }
     if (item.displayedTemperature > item.threshold) {
-      return "#a81c11";
+      return '#a81c11';
     }
-    return "#11a84c";
+    return '#11a84c';
   }
 
   async mounted(): Promise<void> {
-    const configRaw = window.localStorage.getItem("config");
+    const configRaw = window.localStorage.getItem('config');
     if (configRaw !== null) {
       try {
         const config = JSON.parse(configRaw) as SavedSettings;
@@ -535,17 +509,34 @@ export default class Home extends Vue {
         this.selectedDevices,
         this.dateRangeForSelectedTimespan
       );
+      setInterval(async () => {
+        if (this.shouldUpdate()) {
+          const startDate = this.eventItems[0].tsc;
+          await this.fetchEventsForDevices(
+            this.selectedDevices,
+            { startDate },
+            true
+          );
+        }
+      }, 5000);
     }
   }
-  
-  async qrKey(): Promise<string|undefined> {
+
+  shouldUpdate(): boolean {
+    if (this.dateRangeForSelectedTimespan.endDate === undefined) return true;
+    const startDate = Date.parse(this.dateRangeForSelectedTimespan.startDate);
+    const endDate = Date.parse(this.dateRangeForSelectedTimespan.endDate);
+    return endDate < today.getMilliseconds();
+  }
+
+  async qrKey(): Promise<string | undefined> {
     const currAdmin = await this.dbHandler.getCurrAdmin();
-    const key = currAdmin?.organization ?? currAdmin?.username
+    const key = currAdmin?.organization ?? currAdmin?.username;
     return key;
   }
-  
+
   async updateQRUser(qrid: string) {
-    const key = await this.qrKey()
+    const key = await this.qrKey();
     if (key) {
       this.dbHandler.updateQRUser(key, qrid);
       if (!this.qrUsers.includes(qrid)) {
@@ -555,36 +546,49 @@ export default class Home extends Vue {
   }
 
   async deleteQRUsers(qrIds: string[]) {
-    const key = await this.qrKey()
+    const key = await this.qrKey();
     if (key) {
-       qrIds.forEach(val => this.dbHandler.deleteQRUser(key, val));
-       this.qrUsers = this.qrUsers.filter( user => !qrIds.includes(user))
+      qrIds.forEach((val) => this.dbHandler.deleteQRUser(key, val));
+      this.qrUsers = this.qrUsers.filter((user) => !qrIds.includes(user));
     }
   }
 
   async fetchEventsForDevices(
     devices: string[],
-    timeFrame: { startDate: string; endDate?: string }
+    timeFrame: { startDate: string; endDate?: string },
+    isUpdate = false
   ): Promise<void> {
-    this.dataIsLoading = true;
-    const { startDate, endDate } = timeFrame;
+    this.dataIsLoading = !isUpdate;
+    let { startDate, endDate } = timeFrame;
     const allEvents = await Promise.all(
       devices.map((device) =>
         this.dbHandler.getDeviceEvents(device, { startDate, endDate })
       )
     );
-    const mappedEvents = allEvents.flat();
-    this.eventItems = mappedEvents
+    const newEvents = allEvents
+      .flat()
       .filter((item: EventTableItem) => item.displayedTemperature > 0)
       .sort((a: EventTableItem, b: EventTableItem) =>
         a.timestamp < b.timestamp ? 1 : -1
       );
-    if (
-      this.eventItems.find((event) => event.qrid) &&
-      this.headers[1].value !== "qrid"
-    ) {
-      this.headers.splice(1, 0, { text: "ID", value: "qrid", width: 100 });
-    } else if (this.headers[1].value === "qrid") {
+    if (isUpdate) {
+      const updatedEvents = newEvents.filter(
+        (newEvent) =>
+          !this.eventItems.some(
+            (prevEvent) =>
+              newEvent.displayedTemperature ===
+                prevEvent.displayedTemperature &&
+              newEvent.time === prevEvent.time
+          )
+      );
+      this.eventItems = [...updatedEvents, ...this.eventItems];
+    } else {
+      this.eventItems = newEvents;
+    }
+    const hasQR = this.eventItems.find((event) => event.qrid);
+    if (hasQR && this.headers[1].value !== 'qrid') {
+      this.headers.splice(1, 0, { text: 'ID', value: 'qrid', width: 100 });
+    } else if (!hasQR && this.headers[1].value === 'qrid') {
       this.headers.splice(1, 1);
     }
     this.dataIsLoading = false;
@@ -603,7 +607,7 @@ export default class Home extends Vue {
 
   selectedDevicesChanged(deviceIds: string[]): void {
     window.localStorage.setItem(
-      "config",
+      'config',
       JSON.stringify({
         devices: deviceIds,
         timespan: this.selectedTimespan,
@@ -621,7 +625,7 @@ export default class Home extends Vue {
       | string[]
   ): void {
     window.localStorage.setItem(
-      "config",
+      'config',
       JSON.stringify({
         devices: this.selectedDevices,
         timespan: this.isCustomTimespan
@@ -646,7 +650,7 @@ export default class Home extends Vue {
   filterFeverEvents(): void {
     this.showFilteredEvents = !this.showFilteredEvents;
     this.filterEvents = this.showFilteredEvents
-      ? this.events.filter((item) => item.result === "Fever")
+      ? this.events.filter((item) => item.result === 'Fever')
       : this.events;
   }
 
