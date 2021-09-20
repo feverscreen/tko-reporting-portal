@@ -1,6 +1,7 @@
 import Vue from 'vue'
 import Router from 'vue-router'
 import Home from "@/Home.vue"
+import QRApp from "@/QRApp.vue"
 import UserInfo from "@/model/user-info"
 import Auth from "@/model/auth"
 
@@ -23,6 +24,7 @@ export default new Router({
   mode: 'history',
   base: '/',
   routes: [
-    {path:'/', name: 'Home', component: Home, beforeEnter: requireAuth}
+    {path:'/', name: 'Home', component: Home, beforeEnter: requireAuth},
+    {path:'/qr', name: 'Tekahuora', component: QRApp}
   ]
 })

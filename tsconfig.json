@@ -24,6 +24,7 @@
     "lib": [
       "esnext",
       "dom",
+      "webworker",
       "dom.iterable",
       "scripthost"
     ]

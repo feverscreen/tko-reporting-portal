@@ -1,3 +1,5 @@
+const {InjectManifest} = require("workbox-webpack-plugin");
+
 module.exports = {
   chainWebpack: (config) => {
     config.plugin('VuetifyLoaderPlugin').tap((args) => [
@@ -15,6 +17,10 @@ module.exports = {
       },
     ]);
   },
-
+  configureWebpack: {
+    plugins: [
+      new InjectManifest({swSrc:"./src/service-worker.ts"})
+    ]
+  },
   transpileDependencies: ['vuetify'],
 };

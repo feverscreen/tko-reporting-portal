@@ -140,7 +140,7 @@
         <v-btn text @click="printQR(item.id)">
           <v-icon>mdi-printer</v-icon></v-btn
         >
-        <v-dialog v-if="item.id">
+        <v-dialog v-if="item.id" max-width="800">
           <template v-slot:activator="{ on, attrs }">
             <v-btn text v-bind="attrs" v-on="on"
               ><v-icon>mdi-chart-timeline-variant</v-icon></v-btn
@@ -148,6 +148,16 @@
           </template>
           <QRUserStats :qrid="item.id"></QRUserStats>
         </v-dialog>
+        <MailForm :id="item.id"/>
+        <v-tooltip top>
+          <template v-slot:activator="{ on, attrs }">
+        <v-btn text @click="copyIdApp(item.id)"
+          v-bind="attrs" v-on="on"
+          ><v-icon>mdi-link</v-icon></v-btn
+        >
+          </template>
+          <span>Copy QR App Link</span>
+        </v-tooltip>
       </template>
     </v-data-table>
     <canvas ref="qrImage" hidden></canvas>
@@ -159,6 +169,7 @@ import Vue, { PropType } from "vue";
 import { Admin } from "@/model/db-handler";
 import QRImage from "@/components/QRImage.component.vue";
 import QRUserStats from "@/components/QRUserStats.component.vue";
+import MailForm from "@/components/MailForm.component.vue";
 import QRCode from "qrcode";
 import printJS from "print-js";
 import {v4} from "uuid"
@@ -176,7 +187,8 @@ export default Vue.extend({
   },
   components: {
     QRImage,
-    QRUserStats
+    QRUserStats,
+    MailForm
   },
   data: function () {
     return {
@@ -185,7 +197,7 @@ export default Vue.extend({
       tempUsers: [] as { id: string }[],
       selectedUsers: [] as {id: string}[],
       qrHeaders: [
-        { text: "User ID", value: "id" },
+        { text: "User ID", value: "id", width: "300px"},
         { text: "", value: "qr" },
       ],
       adminHeaders: [
@@ -194,6 +206,7 @@ export default Vue.extend({
       ],
       tempId: "",
       tempOrg: "",
+      test: false
     };
   },
   computed: {
@@ -230,6 +243,10 @@ export default Vue.extend({
       }
       return true;
     },
+    sendEmail(event: Event){
+      event.preventDefault();
+      console.log(event);
+    },
     validateOrg(input: string): boolean | string {
       if (input) {
         const duplicate =
@@ -260,11 +277,15 @@ export default Vue.extend({
       this.updateQRUser(user.id);
       this.tempId = "";
     },
-    async printQR(id: string) {
+    async getQRImage(id: string) {
       const qrimg = await QRCode.toDataURL(
         this.$refs.qrImage as HTMLCanvasElement,
         `tko-${id}`
       );
+      return qrimg;
+    },
+    async printQR(id: string) {
+      const qrimg = await this.getQRImage(id);
       printJS({ printable: qrimg, type: "image", imageStyle: "width:350px" });
     },
     closeNewOrg() {
@@ -285,6 +306,10 @@ export default Vue.extend({
     },
     randomId() {
       this.tempId = v4();
+    },
+    copyIdApp(id: string) {
+      const link = `${window.location.toString()}qr?code=tko-${id}`
+      navigator.clipboard.writeText(link);
     }
   },
 });

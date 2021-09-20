@@ -1,5 +1,5 @@
 <template>
-  <v-app>
+  <v-app class="home">
     <v-app-bar color="white" app>
       <div class="logo" />
       <v-spacer />
@@ -19,7 +19,7 @@
       <v-dialog
         ref="dialog"
         v-model="showUsersOverview"
-        :max-width="isSuperAdmin ? 600 : 550"
+        :max-width="750"
       >
         <usersOverview
           :isSuperAdmin="isSuperAdmin"
@@ -184,10 +184,10 @@
               </v-chip>
             </template>
             <template v-slot:[`item.qrid`]="{ item }">
-              <v-dialog v-if="item.qrid">
+              <v-dialog v-if="item.qrid" max-width="800">
                 <template v-slot:activator="{ on, attrs }">
                   <v-row text class="my-2 mr-4" v-bind="attrs" v-on="on">
-                    {{ item.qrid }}
+                    {{ item.qrid.slice(4) }}
                   </v-row>
                 </template>
                 <QRUserStats :qrid="item.qrid"></QRUserStats>
@@ -201,9 +201,8 @@
 </template>
 
 <script lang="ts">
-import DownloadCsv from 'download-csv';
-import VueApexCharts from 'vue-apexcharts';
 import { Component, Vue } from 'vue-property-decorator';
+import DownloadCsv from 'download-csv';
 import { DataTableHeader } from 'vuetify';
 
 import UserInfo from '@/model/user-info';
@@ -216,7 +215,6 @@ import { Device, EventTableItem, Admin } from '@/model/db-handler';
 import Auth from '@/model/auth';
 import { MIN_ERROR_THRESHOLD } from '@/constants';
 
-Vue.use(VueApexCharts);
 
 const today = new Date();
 const todayDate = `${today.getFullYear()}-${
@@ -511,7 +509,7 @@ export default class Home extends Vue {
       );
       setInterval(async () => {
         if (this.shouldUpdate()) {
-          const startDate = this.eventItems[0].tsc;
+          const startDate = this.eventItems[0].tsc ?? new Date().toString();
           await this.fetchEventsForDevices(
             this.selectedDevices,
             { startDate },
@@ -665,8 +663,9 @@ export default class Home extends Vue {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-align: center;
   color: #2c3e50;
+}
+.home {
   margin-top: 60px;
 }
 .logo {
@@ -693,6 +692,7 @@ export default class Home extends Vue {
   border-radius: 50%;
   display: flex;
   flex-direction: column;
+  align-items: center;
   user-select: none;
   > span:first-child {
     font-size: 25px;
