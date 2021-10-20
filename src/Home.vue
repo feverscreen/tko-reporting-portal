@@ -7,7 +7,7 @@
       <span>&nbsp;</span>
       <v-btn text color="#086797" @click="signOut"> Sign out </v-btn>
     </v-app-bar>
-    <v-container>
+    <v-container fluid>
       <v-row align="center">
         <v-toolbar flat>
           <v-spacer />
@@ -33,7 +33,7 @@
       <v-dialog
         ref="dialog"
         v-model="showDevicesOverview"
-        :max-width="isSuperAdmin ? 800 : 450"
+        :max-width="isSuperAdmin ? 900 : 680"
       >
         <devicesOverview
           :devices="Object.values(devices)"
@@ -48,17 +48,20 @@
           :toggle-device-for-admin="dbHandler.toggleDeviceForAdmin"
         />
       </v-dialog>
-      <v-row>
-        <v-col>
+      <v-row >
+        <v-col align="center">
           <v-btn-toggle
             class="pt-3"
+            color="blue accent-3"
             v-model="selectedTimespan"
             mandatory
+            rounded
+            group
             @change="selectedTimespanChanged"
           >
             <v-btn :value="timespans[0].value">Last Hour</v-btn>
             <v-btn :value="timespans[1].value">Today</v-btn>
-            <v-btn :value="timespans[2].value">This Week</v-btn>
+            <v-btn :value="timespans[2].value">Week</v-btn>
             <v-btn
               :value="timespans[3].value"
               @click="showDateRangePicker = true"
@@ -68,10 +71,9 @@
           <v-row v-if="isCustomTimespan">
             <v-dialog ref="dialog" v-model="showDateRangePicker" width="290px">
               <template #activator="{ on, attrs }">
-                <v-row align="center" class="mx-16">
+                <v-row align="center" class="mx-16" width="4em">
                   <v-text-field
                     :value="timespans[timespans.length - 1].value[0]"
-                    style="width: 8em"
                     class="pr-2"
                     label="Custom date range"
                     prepend-icon="mdi-calendar"
@@ -81,7 +83,7 @@
                   />
                   <v-text-field
                     :value="timespans[timespans.length - 1].value[1]"
-                    style="width: 8em"
+                    class="pr-2"
                     readonly
                     v-bind="attrs"
                     v-on="on"
@@ -161,8 +163,8 @@
           </div>
         </div>
       </v-row>
-      <v-row v-if="selectedTimespan && selectedDevices.length" align="center">
-        <v-col>
+      <v-container v-if="selectedTimespan && selectedDevices.length" align="center">
+        <v-col >
           <apexchart
             :temperatures="temperatures"
             :get-color-for-item="getColorForItem"
@@ -187,7 +189,7 @@
               <v-dialog v-if="item.qrid" max-width="800">
                 <template v-slot:activator="{ on, attrs }">
                   <v-row text class="my-2 mr-4" v-bind="attrs" v-on="on">
-                    {{ item.qrid.slice(4) }}
+                    {{ item.qrid.replace("tko-", "") }}
                   </v-row>
                 </template>
                 <QRUserStats :qrid="item.qrid"></QRUserStats>
@@ -195,7 +197,10 @@
             </template>
           </v-data-table>
         </v-col>
-      </v-row>
+      </v-container>
+      <v-col v-else fluid align="center" height="100%">
+        <h2>Awaiting Device Selection...</h2>
+      </v-col>
     </v-container>
   </v-app>
 </template>
@@ -250,19 +255,15 @@ export default class Home extends Vue {
 
   private timespans = [
     {
-      text: 'Last hour',
       value: { start: -1 }, // Relative hours to now.
     },
     {
-      text: 'Last 24 hours',
-      value: { start: -24 },
+      value: { start: -today.getHours() },
     },
     {
-      text: 'This week',
       value: { start: -(24 * 7) },
     },
     {
-      text: 'Custom',
       value: [todayDate, todayDate], // Concrete date ranges
     },
   ];
@@ -479,7 +480,7 @@ export default class Home extends Vue {
           const timespan = this.timespans.find(
             (timespan) =>
               !Array.isArray(timespan.value) &&
-              (timespan as { text: string; value: { start: number } }).value
+              (timespan as { value: { start: number } }).value
                 .start === (config.timespan as { start: number }).start
           );
           if (timespan) {
@@ -565,7 +566,7 @@ export default class Home extends Vue {
     );
     const newEvents = allEvents
       .flat()
-      .filter((item: EventTableItem) => item.displayedTemperature > 0)
+      .filter((item: EventTableItem) => item.displayedTemperature > 33 || item.qrid)
       .sort((a: EventTableItem, b: EventTableItem) =>
         a.timestamp < b.timestamp ? 1 : -1
       );
@@ -653,6 +654,7 @@ export default class Home extends Vue {
   }
 
   signOut(): void {
+    UserInfo.setLoggedOut();
     Auth.logout();
   }
 }

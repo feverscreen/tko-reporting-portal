@@ -1,1 +1,1 @@
-{"name":"tekahuora","short_name":"tko","icons":[{"src":"/tko_icon_x512.png","sizes":"512x512","type":"image/png", "purpose": "any maskable"}],"theme_color":"#ffffff","background_color":"#ffffff","display":"standalone", "start_url": "/qr"}
+{"name":"Te Kahu Ora QR","short_name":"Tko QR","icons":[{"src":"/tko_icon_x512.png","sizes":"512x512","type":"image/png", "purpose": "any maskable"}],"theme_color":"#ffffff","background_color":"#ffffff","display":"standalone", "start_url": "."}

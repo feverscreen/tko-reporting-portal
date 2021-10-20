@@ -12,6 +12,11 @@ function requireAuth(to: any, _: any, next: any) {
     if (window.location.href.includes("?code=")) {
       Auth.auth.parseCognitoWebResponse(window.location.href);
     } else {
+      Auth.auth.onFailure = (err) => {
+        console.log(err);
+        Auth.auth.clearCachedTokensScopes();
+        window.location.reload();
+      }
       Auth.auth.getSession();
     }
   } else {
@@ -25,6 +30,7 @@ export default new Router({
   base: '/',
   routes: [
     {path:'/', name: 'Home', component: Home, beforeEnter: requireAuth},
+    {path:'/qr/:id', name: 'Tekahuora QR', component: QRApp,},
     {path:'/qr', name: 'Tekahuora', component: QRApp}
   ]
 })

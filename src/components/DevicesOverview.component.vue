@@ -180,7 +180,7 @@
           <v-card>
             <v-card-title>
               <span class="text-h5">Device Settings</span>
-              <span class="text--secondary">{{ item.id }}</span>
+              <span class="text--secondary">{{ item.label }}</span>
             </v-card-title>
             <v-container class="pt-0">
               <v-col class="pt-0">
@@ -316,6 +316,7 @@ export default Vue.extend({
       const headers = [
         { text: "Label Id", value: "label", width: 165 },
         { text: "Name", value: "name", width: 165 },
+        { text: "Version", value: "version", width: 165 },
         { text: "Settings", value: "settings", align: "center", width: 125 },
       ];
 

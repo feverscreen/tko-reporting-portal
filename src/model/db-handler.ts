@@ -17,6 +17,7 @@ export interface Device {
   name: string;
   label: string;
   id: string;
+  version?: string;
   alerts: boolean;
   record: boolean;
   qr: boolean;
@@ -176,20 +177,22 @@ export default function DatabaseHandler(
     recordUserActivity: boolean;
     qrMode: boolean;
     labelName: string;
+    version: string;
   }> => {
     const params = {
       TableName: 'DeviceInfo',
       Key: { uid: { S: device } },
-      AttributesToGet: ['recordUserActivity', 'labelName'],
+      AttributesToGet: ['recordUserActivity', 'labelName', 'qrMode', 'version'],
     };
 
     const result = await getItem(params);
 
     const recordUserActivity = result?.Item?.recordUserActivity?.BOOL ?? false;
     const qrMode = result?.Item?.qrMode?.BOOL ?? true;
+    const version = result?.Item?.version?.S ?? "";
     const labelName = result?.Item?.labelName?.S ?? device;
 
-    return { recordUserActivity, qrMode, labelName };
+    return { recordUserActivity, qrMode, labelName, version};
   };
 
   const putDevice = async (user = userId, device: Device) => {
@@ -231,7 +234,7 @@ export default function DatabaseHandler(
       items
         //.filter(({ Disabled }) => Disabled?.BOOL !== true || admin)
         .map(async ({ DeviceId, UserDeviceName, AlertsEnabled, Disabled }) => {
-          const { labelName, qrMode, recordUserActivity } = await getDeviceInfo(
+          const { labelName, qrMode, recordUserActivity, version } = await getDeviceInfo(
             DeviceId.S ?? ''
           );
           return {
@@ -242,6 +245,7 @@ export default function DatabaseHandler(
                 labelName) as string,
               record: recordUserActivity,
               qr: qrMode,
+              version,
               alerts: (AlertsEnabled && AlertsEnabled.S === 'true') || false,
               disable: Disabled && Disabled.BOOL,
             } as Device,
@@ -265,9 +269,8 @@ export default function DatabaseHandler(
       },
       ReturnValues: 'UPDATED_NEW',
     };
-    const result = await updateItem(params);
 
-    return result;
+    return await updateItem(params);
   };
 
   const updateDeviceName = async (device: string, newName: string) => {
@@ -309,20 +312,19 @@ export default function DatabaseHandler(
 
   const updateDeviceQR = async (device: string, qrMode: boolean) => {
     const params = {
-      TableName: 'UserDevices',
+      TableName: 'DeviceInfo',
       Key: {
-        Username: { S: userId },
-        DeviceId: { S: device },
+        uid: { S: device },
       },
       UpdateExpression: 'set qrMode = :qr',
       ExpressionAttributeValues: {
         ':qr': {
-          S: qrMode ? 'true' : 'false',
+          BOOL: qrMode
         },
       },
       ReturnValues: 'UPDATED_NEW',
     };
-    await updateItem(params);
+    return await updateItem(params);
   };
 
   const updateDeviceAlerts = async (device: string, alert: boolean) => {

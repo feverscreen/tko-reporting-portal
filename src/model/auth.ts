@@ -22,7 +22,6 @@ auth.userhandler = {
     const dbHandler = DatabaseHandler(
       auth.getUsername(),
       cognitoIdentity.credentials,
-      cognitoIdentity.isSuperAdmin
     );
     UserInfoStore.setCognitoCredentials(cognitoIdentity);
     UserInfoStore.setDatabaseHandler(dbHandler);
@@ -41,7 +40,6 @@ export default {
     const dbHandler = DatabaseHandler(
       auth.getUsername(),
       cognitoIdentity.credentials,
-      cognitoIdentity.isSuperAdmin
     );
     UserInfoStore.setCognitoCredentials(cognitoIdentity);
     UserInfoStore.setDatabaseHandler(dbHandler);

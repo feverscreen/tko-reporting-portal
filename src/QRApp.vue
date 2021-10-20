@@ -19,7 +19,7 @@ export default class QRApp extends Vue {
     qrContainer: HTMLElement
   }
   getQRCode(): string {
-    const queryCode = this.$router.currentRoute.query["code"]
+    const queryCode = this.$route.params.id ?? this.$router.currentRoute.query["code"]
     const storageCode = window.localStorage.getItem("qrCode");
     if(typeof queryCode === "string") {
       window.localStorage.setItem("qrCode", queryCode);
@@ -34,7 +34,7 @@ export default class QRApp extends Vue {
     const qrCode = this.getQRCode();
     if (qrCode) {
       // ID starts with "tko-" for validation on device;
-      this.id = qrCode.slice(4);
+      this.id = qrCode.replace("tko-", "");
       const width = this.$refs.qrContainer.clientWidth - 40
 
       QRCode.toCanvas(this.$refs.qrImage, qrCode, {width});

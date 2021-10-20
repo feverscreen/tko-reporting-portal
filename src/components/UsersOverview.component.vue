@@ -308,7 +308,7 @@ export default Vue.extend({
       this.tempId = v4();
     },
     copyIdApp(id: string) {
-      const link = `${window.location.toString()}qr?code=tko-${id}`
+      const link = `${window.location.toString()}qr/tko-${id}`
       navigator.clipboard.writeText(link);
     }
   },
