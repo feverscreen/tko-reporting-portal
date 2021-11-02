@@ -1,12 +1,12 @@
-import Vue from 'vue'
-import Router from 'vue-router'
-import Home from "@/Home.vue"
-import QRApp from "@/QRApp.vue"
-import UserInfo from "@/model/user-info"
-import Auth from "@/model/auth"
+import Vue from "vue";
+import Router, { NavigationGuard } from "vue-router";
+import Home from "@/Home.vue";
+import QRApp from "@/QRApp.vue";
+import UserInfo from "@/model/user-info";
+import Auth from "@/model/auth";
 
-Vue.use(Router)
-function requireAuth(to: any, _: any, next: any) {
+Vue.use(Router);
+const requireAuth: NavigationGuard = (_to, _from, next) => {
   if (!Auth.auth.isUserSignedIn()) {
     UserInfo.setLoggedOut();
     if (window.location.href.includes("?code=")) {
@@ -16,21 +16,21 @@ function requireAuth(to: any, _: any, next: any) {
         console.log(err);
         Auth.auth.clearCachedTokensScopes();
         window.location.reload();
-      }
+      };
       Auth.auth.getSession();
     }
   } else {
-    Auth.getUserInfo();
+    Auth.setupUser();
     next();
   }
-}
+};
 
 export default new Router({
-  mode: 'history',
-  base: '/',
+  mode: "history",
+  base: "/",
   routes: [
-    {path:'/', name: 'Home', component: Home, beforeEnter: requireAuth},
-    {path:'/qr/:id', name: 'Tekahuora QR', component: QRApp,},
-    {path:'/qr', name: 'Tekahuora', component: QRApp}
-  ]
-})
+    { path: "/", name: "Home", component: Home, beforeEnter: requireAuth },
+    { path: "/qr/:id", name: "Tekahuora QR", component: QRApp },
+    { path: "/qr", name: "Tekahuora", component: QRApp },
+  ],
+});

@@ -1,13 +1,13 @@
-import CognitoIdentity from "@/model/cognito-identity"
-import DatabaseHandler from "@/model/db-handler"
+import CognitoIdentity from "@/model/cognito-identity";
+import DatabaseHandler from "@/model/db-handler";
 
 export default {
   state: {
     cognitoCredentials: null as ReturnType<typeof CognitoIdentity> | null,
-    databaseHandler: null as ReturnType< typeof DatabaseHandler> | null,
+    databaseHandler: null as ReturnType<typeof DatabaseHandler> | null,
     loggedIn: false,
     loading: true,
-    errorLoading: false
+    errorLoading: false,
   },
   setLoggedIn(state: boolean) {
     this.state.loggedIn = state;
@@ -19,12 +19,12 @@ export default {
   setCognitoCredentials(state: ReturnType<typeof CognitoIdentity> | null) {
     if (state) {
       this.state.cognitoCredentials = state;
-      this.setLoggedIn(true)
+      this.setLoggedIn(true);
     } else {
       this.setLoggedOut();
     }
   },
   setDatabaseHandler(state: ReturnType<typeof DatabaseHandler> | null) {
     this.state.databaseHandler = state;
-  }
-}
+  },
+};

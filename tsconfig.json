@@ -29,6 +29,9 @@
       "scripthost"
     ]
   },
+  "vueCompilerOptions": {
+    "experimentalCompatMode": 2
+  },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",

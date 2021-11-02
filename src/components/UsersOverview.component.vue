@@ -58,11 +58,7 @@
             </v-btn>
           </template>
           <v-list>
-            <v-dialog
-              v-model="deleteUsersDialog"
-              max-width="310px"
-              persistent
-            >
+            <v-dialog v-model="deleteUsersDialog" max-width="310px" persistent>
               <template v-slot:activator="{ on, attrs }">
                 <v-btn text class="my-2 mr-4" v-bind="attrs" v-on="on">
                   Delete
@@ -79,7 +75,7 @@
                 </v-card-text>
                 <v-card-actions>
                   <v-btn color="error" v-on:click="deleteSelectedUsers">
-                    Delete Users
+                    Delete
                   </v-btn>
                   <v-btn
                     color="blue darken-1"
@@ -100,61 +96,61 @@
       :items="qrUsers"
       :headers="qrHeaders"
       :items-per-page="20"
+      item-key="qrid"
       show-select
       dense
     >
-      <template v-slot:[`item.id`]="{ item }">
+      <template v-slot:[`item.qrid`]="{ item }">
         <v-edit-dialog
-          :ref="item.id ? item.id : 'tempEdit'"
+          :ref="item.qrid ? item.qrid : 'tempEdit'"
           @close="saveUserId(item)"
-          :return-value.sync="item.id"
+          :return-value.sync="item.qrid"
         >
           <v-row>
-            {{ item.id }}
+            {{ item.qrid }}
             <v-icon small class="mx-1"> mdi-pencil</v-icon>
           </v-row>
           <template v-slot:input>
             <div class="d-flex flex-nowrap align-center">
-            <v-text-field
-              v-model="tempId"
-              :label="item.id"
-              :rules="[validateQR]"
-              single-line
-              clearable
-              counter
-            ></v-text-field>
+              <v-text-field
+                v-model="tempId"
+                :label="item.qrid"
+                :rules="[validateQR]"
+                single-line
+                clearable
+                counter
+              ></v-text-field>
               <v-btn @click="randomId" small class="ml-4">Random</v-btn>
-          </div>
+            </div>
           </template>
         </v-edit-dialog>
       </template>
       <template v-slot:[`item.qr`]="{ item }">
         <v-dialog max-width="160" hide-overlay>
           <template v-slot:activator="{ on, attrs }">
-            <v-btn text v-bind="attrs" v-on="on"
+            <v-btn v-bind="attrs" text v-on="on"
               ><v-icon>mdi-qrcode</v-icon></v-btn
             >
           </template>
-          <QRImage :id="item.id" />
+          <QRImage :id="item.qrid" />
         </v-dialog>
-        <v-btn text @click="printQR(item.id)">
+        <v-btn text @click="printQR(item.qrid)">
           <v-icon>mdi-printer</v-icon></v-btn
         >
-        <v-dialog v-if="item.id" max-width="800">
+        <v-dialog v-if="item.qrid" max-width="800">
           <template v-slot:activator="{ on, attrs }">
-            <v-btn text v-bind="attrs" v-on="on"
+            <v-btn v-bind="attrs" text v-on="on"
               ><v-icon>mdi-chart-timeline-variant</v-icon></v-btn
             >
           </template>
-          <QRUserStats :qrid="item.id"></QRUserStats>
+          <QRUserStats :qrid="item.qrid"></QRUserStats>
         </v-dialog>
-        <MailForm :id="item.id"/>
+        <MailForm :user="item" :makeUserLink="makeUserLink" />
         <v-tooltip top>
           <template v-slot:activator="{ on, attrs }">
-        <v-btn text @click="copyIdApp(item.id)"
-          v-bind="attrs" v-on="on"
-          ><v-icon>mdi-link</v-icon></v-btn
-        >
+            <v-btn v-bind="attrs" text @click="copyIdApp(item)" v-on="on"
+              ><v-icon>mdi-link</v-icon></v-btn
+            >
           </template>
           <span>Copy QR App Link</span>
         </v-tooltip>
@@ -166,21 +162,23 @@
 
 <script lang="ts">
 import Vue, { PropType } from "vue";
-import { Admin } from "@/model/db-handler";
+import { Admin, User } from "@/model/db-handler";
+import { createHash } from "@/model/utils";
 import QRImage from "@/components/QRImage.component.vue";
 import QRUserStats from "@/components/QRUserStats.component.vue";
 import MailForm from "@/components/MailForm.component.vue";
 import QRCode from "qrcode";
 import printJS from "print-js";
-import {v4} from "uuid"
+import { v4 } from "uuid";
 
 export default Vue.extend({
   props: {
     isSuperAdmin: Boolean,
     adminUsers: Array as PropType<Admin[]>,
-    users: Array as PropType<string[]>,
-    updateQRUser: Function as PropType<(qrId: string) => void>,
-    deleteQRUsers: Function as PropType<(qrIds: string[]) => void>,
+    users: Array as PropType<User[]>,
+    qrKey: Function as PropType<() => Promise<string>>,
+    updateQRUser: Function as PropType<(user: { qrid: string }) => void>,
+    deleteQRUsers: Function as PropType<(users: User[]) => void>,
     updateAdminOrg: Function as PropType<
       (adminId: string, organization: string) => void
     >,
@@ -188,16 +186,16 @@ export default Vue.extend({
   components: {
     QRImage,
     QRUserStats,
-    MailForm
+    MailForm,
   },
   data: function () {
     return {
       newUserDialog: false,
       deleteUsersDialog: false,
-      tempUsers: [] as { id: string }[],
-      selectedUsers: [] as {id: string}[],
+      tempUsers: [] as User[],
+      selectedUsers: [] as User[],
       qrHeaders: [
-        { text: "User ID", value: "id", width: "300px"},
+        { text: "User ID", value: "qrid", width: "300px" },
         { text: "", value: "qr" },
       ],
       adminHeaders: [
@@ -206,13 +204,13 @@ export default Vue.extend({
       ],
       tempId: "",
       tempOrg: "",
-      test: false
+      test: false,
     };
   },
   computed: {
     qrUsers: {
-      get: function (): { id: string }[] {
-        return [...this.users.map((id) => ({ id })), ...this.tempUsers];
+      get: function (): User[] {
+        return [...this.users, ...this.tempUsers];
       },
     },
     organizations: {
@@ -225,25 +223,28 @@ export default Vue.extend({
   },
   methods: {
     addNewUser() {
-      this.tempUsers.push({ id: "" });
+      this.tempUsers.push({ qrid: "", organization: "" });
       this.$nextTick(() => {
-      (this.$refs.tempEdit as any).isActive = true;
-      })
+        (this.$refs.tempEdit as any).isActive = true;
+      });
     },
     validateQR(input: string): boolean | string {
       if (input) {
         const duplicate =
-          this.qrUsers.filter(({ id }) => id === input).length !== 0;
+          this.qrUsers.filter(({ qrid }) => qrid === input).length !== 0;
         const long = input.length > 50;
-        return !long && !duplicate
+        const hasDash = input.includes("-");
+        return !long && !duplicate && !hasDash
           ? true
           : long
           ? "Max Characters 50"
+          : hasDash
+          ? "Can not contain '-'"
           : "Duplicate ID found";
       }
       return true;
     },
-    sendEmail(event: Event){
+    sendEmail(event: Event) {
       event.preventDefault();
       console.log(event);
     },
@@ -260,21 +261,22 @@ export default Vue.extend({
       }
       return true;
     },
-    saveUserId(user: { id: string }) {
-      if (this.qrUsers.filter(({ id }) => id === this.tempId).length > 0) {
+    saveUserId(user: { qrid: string }) {
+      console.log(user);
+      if (this.qrUsers.filter(({ qrid }) => qrid === this.tempId).length > 0) {
         this.tempUsers = [];
         return;
       }
       if (this.tempId) {
-        user.id = this.tempId;
+        user.qrid = this.tempId;
       } else {
         this.tempUsers = [];
-        if (user.id === "") {
+        if (user.qrid === "") {
           return;
         }
       }
       this.tempUsers = [];
-      this.updateQRUser(user.id);
+      this.updateQRUser(user);
       this.tempId = "";
     },
     async getQRImage(id: string) {
@@ -299,18 +301,21 @@ export default Vue.extend({
       this.updateAdminOrg(username, org);
     },
     deleteSelectedUsers() {
-      const users = this.selectedUsers.map(val => val.id);
-      this.deleteQRUsers(users)
+      this.deleteQRUsers(this.selectedUsers);
       this.selectedUsers = [];
       this.deleteUsersDialog = false;
     },
     randomId() {
-      this.tempId = v4();
+      this.tempId = v4().replaceAll("-", "");
     },
-    copyIdApp(id: string) {
-      const link = `${window.location.toString()}qr/tko-${id}`
+    async makeUserLink(user: User) {
+      const hashAPI = await createHash(`${user.organization}-${user.qrid}`);
+      return `${window.location.toString()}qr/tko-${hashAPI}`;
+    },
+    async copyIdApp(id: User) {
+      const link = await this.makeUserLink(id);
       navigator.clipboard.writeText(link);
-    }
+    },
   },
 });
 </script>

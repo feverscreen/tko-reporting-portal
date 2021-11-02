@@ -16,15 +16,12 @@
           <v-btn text @click="exportCsv"> Export CSV </v-btn>
         </v-toolbar>
       </v-row>
-      <v-dialog
-        ref="dialog"
-        v-model="showUsersOverview"
-        :max-width="750"
-      >
+      <v-dialog ref="dialog" v-model="showUsersOverview" :max-width="750">
         <usersOverview
           :isSuperAdmin="isSuperAdmin"
           :adminUsers="adminUsers"
           :users="qrUsers"
+          :qrKey="qrKey"
           :updateQRUser="updateQRUser"
           :deleteQRUsers="deleteQRUsers"
           :updateAdminOrg="dbHandler.updateAdminOrg"
@@ -36,7 +33,11 @@
         :max-width="isSuperAdmin ? 900 : 680"
       >
         <devicesOverview
-          :devices="Object.values(devices)"
+          :devices="
+            Object.values(devices).filter(
+              (device) => !device.disable || isSuperAdmin
+            )
+          "
           :isSuperAdmin="isSuperAdmin"
           :adminUsers="adminUsers"
           :delete-device="deleteDevice"
@@ -48,7 +49,7 @@
           :toggle-device-for-admin="dbHandler.toggleDeviceForAdmin"
         />
       </v-dialog>
-      <v-row >
+      <v-row>
         <v-col align="center">
           <v-btn-toggle
             class="pt-3"
@@ -73,19 +74,19 @@
               <template #activator="{ on, attrs }">
                 <v-row align="center" class="mx-16" width="4em">
                   <v-text-field
-                    :value="timespans[timespans.length - 1].value[0]"
+                    v-bind="attrs"
+                    :value="timespans[3].value[0]"
                     class="pr-2"
                     label="Custom date range"
                     prepend-icon="mdi-calendar"
                     readonly
-                    v-bind="attrs"
                     v-on="on"
                   />
                   <v-text-field
-                    :value="timespans[timespans.length - 1].value[1]"
+                    v-bind="attrs"
+                    :value="timespans[3].value[1]"
                     class="pr-2"
                     readonly
-                    v-bind="attrs"
                     v-on="on"
                   />
                 </v-row>
@@ -163,8 +164,11 @@
           </div>
         </div>
       </v-row>
-      <v-container v-if="selectedTimespan && selectedDevices.length" align="center">
-        <v-col >
+      <v-container
+        v-if="selectedTimespan && selectedDevices.length"
+        align="center"
+      >
+        <v-col>
           <apexchart
             :temperatures="temperatures"
             :get-color-for-item="getColorForItem"
@@ -185,11 +189,11 @@
                 {{ item.displayedTemperature }}
               </v-chip>
             </template>
-            <template v-slot:[`item.qrid`]="{ item }">
+            <template #[`item.qrid`]="{ item }">
               <v-dialog v-if="item.qrid" max-width="800">
                 <template v-slot:activator="{ on, attrs }">
-                  <v-row text class="my-2 mr-4" v-bind="attrs" v-on="on">
-                    {{ item.qrid.replace("tko-", "") }}
+                  <v-row v-bind="attrs" text class="my-2 mr-4" v-on="on">
+                    {{ item.qrid.split("-").at(-1) }}
                   </v-row>
                 </template>
                 <QRUserStats :qrid="item.qrid"></QRUserStats>
@@ -206,20 +210,19 @@
 </template>
 
 <script lang="ts">
-import { Component, Vue } from 'vue-property-decorator';
-import DownloadCsv from 'download-csv';
-import { DataTableHeader } from 'vuetify';
+import { Component, Vue } from "vue-property-decorator";
+import DownloadCsv from "download-csv";
+import { DataTableHeader } from "vuetify";
 
-import UserInfo from '@/model/user-info';
-import ScreeningChart from '@/components/ScreeningChart.component.vue';
-import devicesOverview from '@/components/DevicesOverview.component.vue';
-import usersOverview from '@/components/UsersOverview.component.vue';
-import QRUserStats from '@/components/QRUserStats.component.vue';
-import { formatDate } from '@/model/utils';
-import { Device, EventTableItem, Admin } from '@/model/db-handler';
-import Auth from '@/model/auth';
-import { MIN_ERROR_THRESHOLD } from '@/constants';
-
+import UserInfo from "@/model/user-info";
+import ScreeningChart from "@/components/ScreeningChart.component.vue";
+import devicesOverview from "@/components/DevicesOverview.component.vue";
+import usersOverview from "@/components/UsersOverview.component.vue";
+import QRUserStats from "@/components/QRUserStats.component.vue";
+import { formatDate } from "@/model/utils";
+import { Device, EventTableItem, Admin, User } from "@/model/db-handler";
+import Auth from "@/model/auth";
+import { MIN_ERROR_THRESHOLD } from "@/constants";
 
 const today = new Date();
 const todayDate = `${today.getFullYear()}-${
@@ -240,20 +243,26 @@ interface SavedSettings {
   },
 })
 export default class Home extends Vue {
-  private devices: Record<string, Device> = {};
-  private adminUsers: Admin[] = [];
-  private qrUsers: string[] = [];
-  private selectedDevices: string[] = [];
-  private eventItems: EventTableItem[] = [];
-  private dataIsLoading = false;
-  private showDateRangePicker = false;
-  private showUsersOverview = false;
-  private showDevicesOverview = false;
-  private isSuperAdmin =
-    UserInfo.state.cognitoCredentials?.isSuperAdmin ?? false;
-  private toggleTimespan = 0;
+  devices: Record<string, Device> = {};
+  qrUsers: User[] = [];
+  selectedDevices: string[] = [];
+  eventItems: EventTableItem[] = [];
+  showDateRangePicker = false;
+  isSuperAdmin = UserInfo.state.cognitoCredentials?.isSuperAdmin ?? false;
+  adminUsers: Admin[] = [];
+  dataIsLoading = false;
+  showUsersOverview = false;
+  showDevicesOverview = false;
+  toggleTimespan = 0;
+  showFilteredEvents = false;
+  filterEvents: EventTableItem[] = [];
 
-  private timespans = [
+  timespans: [
+    { value: { start: number } },
+    { value: { start: number } },
+    { value: { start: number } },
+    { value: [string, string] }
+  ] = [
     {
       value: { start: -1 }, // Relative hours to now.
     },
@@ -268,29 +277,29 @@ export default class Home extends Vue {
     },
   ];
 
-  private selectedTimespan: { start: number } | string[] =
+  selectedTimespan: { start: number } | [string, string] =
     this.timespans[1].value;
 
   // noinspection JSMismatchedCollectionQueryUpdate
-  private headers: DataTableHeader[] = [
+  headers: DataTableHeader[] = [
     {
-      text: 'Device',
-      value: 'device',
+      text: "Device",
+      value: "device",
       width: 240,
     },
     {
-      text: 'Screened Temp C',
-      value: 'displayedTemperature',
+      text: "Screened Temp C",
+      value: "displayedTemperature",
       width: 140,
     },
     {
-      text: 'Fever Threshold C',
-      value: 'threshold',
+      text: "Fever Threshold C",
+      value: "threshold",
       width: 120,
     },
     {
-      text: 'Time',
-      value: 'time',
+      text: "Time",
+      value: "time",
       width: 240,
     },
   ];
@@ -312,10 +321,10 @@ export default class Home extends Vue {
   }
 
   get icon() {
-    if (this.selectedAllDevices) return 'mdi-close-box';
+    if (this.selectedAllDevices) return "mdi-close-box";
     if (this.selectedDevices.length > 0 && !this.selectedAllDevices)
-      return 'mdi-minus-box';
-    return 'mdi-checkbox-blank-outline';
+      return "mdi-minus-box";
+    return "mdi-checkbox-blank-outline";
   }
 
   get deviceIds(): { name: string; id: string }[] {
@@ -366,26 +375,26 @@ export default class Home extends Vue {
 
   get resultsSummaryText(): string {
     return `${this.eventItems.length} total screenings, ${
-      this.eventItems.filter((item) => item.result === 'Fever').length
+      this.eventItems.filter((item) => item.result === "Fever").length
     } screened as Fever`;
   }
 
   get numNormalEvents(): number {
-    return this.eventItems.filter((item) => item.result === 'Normal').length;
+    return this.eventItems.filter((item) => item.result === "Normal").length;
   }
 
   get numErrorEvents(): number {
-    return this.eventItems.filter((item) => item.result === 'Error').length;
+    return this.eventItems.filter((item) => item.result === "Error").length;
   }
 
   get numFeverEvents(): number {
-    return this.eventItems.filter((item) => item.result === 'Fever').length;
+    return this.eventItems.filter((item) => item.result === "Fever").length;
   }
 
   get temperatures() {
     return [
       {
-        name: 'temperatures',
+        name: "temperatures",
         data: this.eventItems.map(
           ({ displayedTemperature }) => displayedTemperature
         ),
@@ -416,7 +425,7 @@ export default class Home extends Vue {
     isDesc: (boolean | undefined)[]
   ): EventTableItem[] {
     if (index[0] !== undefined) {
-      const i = index[0] === 'time' ? 'timestamp' : index[0];
+      const i = index[0] === "time" ? "timestamp" : index[0];
       if (isDesc[0]) {
         items.sort((a: any, b: any) => (a[i] < b[i] ? 1 : -1));
       } else {
@@ -434,39 +443,39 @@ export default class Home extends Vue {
 
   exportCsv() {
     let start = this.dateRangeForSelectedTimespan.startDate as string;
-    start = start.substr(0, start.lastIndexOf('_'));
+    start = start.substr(0, start.lastIndexOf("_"));
     let end =
       this.dateRangeForSelectedTimespan.endDate || formatDate(new Date());
-    end = end.substr(0, end.lastIndexOf('_'));
-    const range = `${start} - ${end}`.replace(/T/g, ' ').replace(/_/g, '-');
+    end = end.substr(0, end.lastIndexOf("_"));
+    const range = `${start} - ${end}`.replace(/T/g, " ").replace(/_/g, "-");
     DownloadCsv(
       this.events,
       {
-        device: 'Device',
-        timestamp: 'Date/Time',
-        displayedTemperature: 'Screened Temp C',
-        threshold: 'Fever Threshold C',
-        time: 'Time',
-        result: 'Screening Result',
+        device: "Device",
+        timestamp: "Date/Time",
+        displayedTemperature: "Screened Temp C",
+        threshold: "Fever Threshold C",
+        time: "Time",
+        result: "Screening Result",
       },
       `${this.selectedDevices
-        .map((device) => this.devices[device].name.replace(/,/g, ''))
-        .join('|')} -- ${range}.csv`
+        .map((device) => this.devices[device].name.replace(/,/g, ""))
+        .join("|")} -- ${range}.csv`
     );
   }
 
   getColorForItem(item: EventTableItem): string {
     if (item.displayedTemperature > MIN_ERROR_THRESHOLD) {
-      return '#B8860B';
+      return "#B8860B";
     }
     if (item.displayedTemperature > item.threshold) {
-      return '#a81c11';
+      return "#a81c11";
     }
-    return '#11a84c';
+    return "#11a84c";
   }
 
   async mounted(): Promise<void> {
-    const configRaw = window.localStorage.getItem('config');
+    const configRaw = window.localStorage.getItem("config");
     if (configRaw !== null) {
       try {
         const config = JSON.parse(configRaw) as SavedSettings;
@@ -480,8 +489,8 @@ export default class Home extends Vue {
           const timespan = this.timespans.find(
             (timespan) =>
               !Array.isArray(timespan.value) &&
-              (timespan as { value: { start: number } }).value
-                .start === (config.timespan as { start: number }).start
+              (timespan as { value: { start: number } }).value.start ===
+                (config.timespan as { start: number }).start
           );
           if (timespan) {
             this.selectedTimespan = timespan.value;
@@ -523,7 +532,6 @@ export default class Home extends Vue {
 
   shouldUpdate(): boolean {
     if (this.dateRangeForSelectedTimespan.endDate === undefined) return true;
-    const startDate = Date.parse(this.dateRangeForSelectedTimespan.startDate);
     const endDate = Date.parse(this.dateRangeForSelectedTimespan.endDate);
     return endDate < today.getMilliseconds();
   }
@@ -534,21 +542,22 @@ export default class Home extends Vue {
     return key;
   }
 
-  async updateQRUser(qrid: string) {
+  async updateQRUser(qrid: { qrid: string }) {
     const key = await this.qrKey();
+    const user = { ...qrid, organization: key ?? "" };
     if (key) {
-      this.dbHandler.updateQRUser(key, qrid);
-      if (!this.qrUsers.includes(qrid)) {
-        this.qrUsers.push(qrid);
+      this.dbHandler.updateQRUser(user);
+      if (!this.qrUsers.includes(user)) {
+        this.qrUsers.push(user);
       }
     }
   }
 
-  async deleteQRUsers(qrIds: string[]) {
+  async deleteQRUsers(users: User[]) {
     const key = await this.qrKey();
     if (key) {
-      qrIds.forEach((val) => this.dbHandler.deleteQRUser(key, val));
-      this.qrUsers = this.qrUsers.filter((user) => !qrIds.includes(user));
+      users.forEach((user) => this.dbHandler.deleteQRUser(user));
+      this.qrUsers = this.qrUsers.filter((user) => !users.includes(user));
     }
   }
 
@@ -566,7 +575,9 @@ export default class Home extends Vue {
     );
     const newEvents = allEvents
       .flat()
-      .filter((item: EventTableItem) => item.displayedTemperature > 33 || item.qrid)
+      .filter(
+        (item: EventTableItem) => item.displayedTemperature > 33 || item.qrid
+      )
       .sort((a: EventTableItem, b: EventTableItem) =>
         a.timestamp < b.timestamp ? 1 : -1
       );
@@ -585,9 +596,9 @@ export default class Home extends Vue {
       this.eventItems = newEvents;
     }
     const hasQR = this.eventItems.find((event) => event.qrid);
-    if (hasQR && this.headers[1].value !== 'qrid') {
-      this.headers.splice(1, 0, { text: 'ID', value: 'qrid', width: 100 });
-    } else if (!hasQR && this.headers[1].value === 'qrid') {
+    if (hasQR && this.headers[1].value !== "qrid") {
+      this.headers.splice(1, 0, { text: "ID", value: "qrid", width: 100 });
+    } else if (!hasQR && this.headers[1].value === "qrid") {
       this.headers.splice(1, 1);
     }
     this.dataIsLoading = false;
@@ -606,7 +617,7 @@ export default class Home extends Vue {
 
   selectedDevicesChanged(deviceIds: string[]): void {
     window.localStorage.setItem(
-      'config',
+      "config",
       JSON.stringify({
         devices: deviceIds,
         timespan: this.selectedTimespan,
@@ -624,7 +635,7 @@ export default class Home extends Vue {
       | string[]
   ): void {
     window.localStorage.setItem(
-      'config',
+      "config",
       JSON.stringify({
         devices: this.selectedDevices,
         timespan: this.isCustomTimespan
@@ -644,12 +655,10 @@ export default class Home extends Vue {
     }
   }
 
-  private showFilteredEvents = false;
-  private filterEvents: EventTableItem[] = [];
   filterFeverEvents(): void {
     this.showFilteredEvents = !this.showFilteredEvents;
     this.filterEvents = this.showFilteredEvents
-      ? this.events.filter((item) => item.result === 'Fever')
+      ? this.events.filter((item) => item.result === "Fever")
       : this.events;
   }
 

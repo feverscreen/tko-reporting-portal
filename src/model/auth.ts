@@ -1,9 +1,9 @@
 import { CognitoAuth, CognitoAuthSession } from "amazon-cognito-auth-js";
 
-import Router from "@/router"
-import UserInfoStore from "@/model/user-info"
-import CognitoIdentity from "@/model/cognito-identity"
-import DatabaseHandler from "@/model/db-handler"
+import Router from "@/router";
+import UserInfoStore from "@/model/user-info";
+import CognitoIdentity from "@/model/cognito-identity";
+import DatabaseHandler from "@/model/db-handler";
 
 const HostName = `${window.location.protocol}//${window.location.host}`;
 
@@ -18,14 +18,7 @@ const auth = new CognitoAuth({
 auth.userhandler = {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onSuccess: (_session: CognitoAuthSession): void => {
-    const cognitoIdentity = CognitoIdentity(auth);
-    const dbHandler = DatabaseHandler(
-      auth.getUsername(),
-      cognitoIdentity.credentials,
-    );
-    UserInfoStore.setCognitoCredentials(cognitoIdentity);
-    UserInfoStore.setDatabaseHandler(dbHandler);
-    Router.push('/');
+    Router.push("/");
   },
   onFailure: () => {
     UserInfoStore.setLoggedOut();
@@ -35,11 +28,11 @@ auth.useCodeGrantFlow();
 
 export default {
   auth,
-  getUserInfo() {
+  setupUser() {
     const cognitoIdentity = CognitoIdentity(auth);
     const dbHandler = DatabaseHandler(
       auth.getUsername(),
-      cognitoIdentity.credentials,
+      cognitoIdentity.credentials
     );
     UserInfoStore.setCognitoCredentials(cognitoIdentity);
     UserInfoStore.setDatabaseHandler(dbHandler);
@@ -51,5 +44,5 @@ export default {
     if (auth.isUserSignedIn()) {
       auth.signOut();
     }
-  }
-}
+  },
+};

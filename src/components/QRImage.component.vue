@@ -14,7 +14,7 @@ export default Vue.extend({
   props: {
     id: String,
   },
-  mounted: function () {
+  mounted: async function () {
     QRCode.toCanvas(this.$refs.qrImage, this.id);
   },
 });
